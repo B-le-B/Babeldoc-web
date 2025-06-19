@@ -4,8 +4,8 @@ import tempfile
 import os
 from pathlib import Path
 import time
-import tkinter as tk
-from tkinter import filedialog
+#import tkinter as tk
+#from tkinter import filedialog
 from dotenv import load_dotenv
 import threading
 import queue
