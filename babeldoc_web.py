@@ -9,6 +9,7 @@ import queue
 import zipfile
 import io
 import re
+import uuid
 
 # 加载.env文件
 try:
@@ -208,8 +209,8 @@ def get_file_stem(filename):
     """从文件名获取不带扩展名的部分"""
     return Path(filename).stem
 
-def find_output_files(output_path, original_filename):
-    """查找输出文件"""
+def find_and_read_output_files(output_path, original_filename):
+    """查找并读取输出文件到内存"""
     output_files = []
     if not os.path.exists(output_path):
         return output_files
@@ -225,13 +226,29 @@ def find_output_files(output_path, original_filename):
     ]
     
     try:
+        found_files = []
         for pattern in search_patterns:
-            found_files = list(Path(output_path).glob(pattern))
-            output_files.extend(found_files)
+            found_files.extend(list(Path(output_path).glob(pattern)))
         
         # 去重并按修改时间排序（最新的在前）
-        output_files = list(set(output_files))
-        output_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        found_files = list(set(found_files))
+        found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        # 读取文件到内存
+        for file_path in found_files:
+            if file_path.exists():
+                try:
+                    with open(file_path, 'rb') as f:
+                        file_data = f.read()
+                    
+                    output_files.append({
+                        'original_name': original_filename,
+                        'translated_name': file_path.name,
+                        'file_data': file_data,
+                        'size': len(file_data)
+                    })
+                except Exception as e:
+                    print(f"读取文件失败: {e}")
         
     except Exception:
         pass
@@ -242,9 +259,8 @@ def create_download_zip(files):
     """创建包含多个文件的ZIP"""
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for file_path in files:
-            if file_path.exists():
-                zip_file.write(file_path, file_path.name)
+        for file_info in files:
+            zip_file.writestr(file_info['translated_name'], file_info['file_data'])
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
@@ -276,24 +292,18 @@ def display_download_section(results):
                        unsafe_allow_html=True)
         
         with col2:
-            try:
-                with open(result['file_path'], 'rb') as f:
-                    file_data = f.read()
-                st.download_button(
-                    label="下载",
-                    data=file_data,
-                    file_name=result['translated_name'],
-                    mime="application/pdf",
-                    key=f"download_{result['translated_name']}_{i}_{int(time.time())}"
-                )
-            except Exception as e:
-                st.error(f"读取文件失败: {e}")
+            st.download_button(
+                label="下载",
+                data=result['file_data'],
+                file_name=result['translated_name'],
+                mime="application/pdf",
+                key=f"download_{result['translated_name']}_{i}_{int(time.time())}"
+            )
     
     # 批量下载
     if len(results) > 1:
         try:
-            file_paths = [r['file_path'] for r in results]
-            zip_data = create_download_zip(file_paths)
+            zip_data = create_download_zip(results)
             
             st.download_button(
                 label="📦 下载所有文件 (ZIP)",
@@ -310,9 +320,6 @@ def display_download_section(results):
 # 初始化会话状态
 if 'translation_results' not in st.session_state:
     st.session_state.translation_results = []
-
-if 'is_translating' not in st.session_state:
-    st.session_state.is_translating = False
 
 # 显示应用标题
 st.markdown(
@@ -332,9 +339,8 @@ uploaded_files = st.file_uploader(
 # 开始翻译按钮
 start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files)
 
-# 如果点击了翻译按钮，立即设置翻译状态并清空缓存
+# 如果点击了翻译按钮，立即清空缓存
 if start_button:
-    st.session_state.is_translating = True
     st.session_state.translation_results = []
 
 # 立即预留进度和日志显示位置
@@ -432,35 +438,19 @@ with st.expander("🤖 大模型设置"):
             else:
                 st.info(f"📌 当前使用: **{selected_provider}** | 模型: `{openai_model}` (自定义)")
 
-# 基本设置
-with st.expander("⚙️ 基本设置", expanded=True):
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        pages = st.text_input("页面范围", "", placeholder="例: 1-5,8,10-")
-        
-    with col2:
-        if 'output_path' not in st.session_state:
-            st.session_state.output_path = "/tmp/translate_output"
-        
-        output_path = st.text_input(
-            "输出路径", 
-            value=st.session_state.output_path,
-            help="翻译后的PDF文件保存路径",
-            key="output_path_input"
-        )
-
-# 输出选项
+# 输出选项 - 将页码范围移到这里
 with st.expander("📄 输出选项"):
     col3, col4 = st.columns(2)
     
     with col3:
+        pages = st.text_input("页面范围", "", placeholder="例: 1-5,8,10-", 
+                             help="指定要翻译的页面，留空则翻译全部页面")
         watermark_mode = st.selectbox("水印模式", 
             ["watermarked", "no_watermark", "both"], index=1,
             format_func=lambda x: {"watermarked": "添加水印", "no_watermark": "无水印", "both": "两种版本"}[x])
-        no_dual = st.checkbox("不输出双语版", help="不生成原文+译文对照版本")
         
     with col4:
+        no_dual = st.checkbox("不输出双语版", help="不生成原文+译文对照版本")
         no_mono = st.checkbox("不输出单语版", value=True, help="不生成纯翻译版本")
         only_translated = st.checkbox("仅包含翻译页面", help="输出PDF中只包含翻译的页面")
 
@@ -497,31 +487,16 @@ with st.expander("🔧 高级选项"):
         max_pages_per_part = st.number_input("每部分最大页数", 
             value=0, min_value=0, max_value=1000, help="分割翻译的每部分最大页数，0表示不分割")
 
-# 显示之前的下载结果（只在没有翻译进行中时显示）
-if st.session_state.translation_results and not st.session_state.is_translating:
+# 显示之前的下载结果（只在没有开始新翻译时显示）
+if st.session_state.translation_results and not start_button:
     st.markdown("---")
     display_download_section(st.session_state.translation_results)
 
-# 翻译处理逻辑 - 在占位符中显示
-if start_button or st.session_state.is_translating:
+# 翻译处理逻辑
+if start_button:
     if use_openai and not openai_key:
         with progress_log_placeholder.container():
             st.error("❌ 请输入API Key")
-        st.session_state.is_translating = False
-        st.stop()
-    
-    if not output_path:
-        with progress_log_placeholder.container():
-            st.error("❌ 请设置输出路径")
-        st.session_state.is_translating = False
-        st.stop()
-    
-    try:
-        os.makedirs(output_path, exist_ok=True)
-    except Exception as e:
-        with progress_log_placeholder.container():
-            st.error(f"❌ 创建输出目录失败: {e}")
-        st.session_state.is_translating = False
         st.stop()
     
     # 在占位符中显示进度和日志
@@ -530,11 +505,8 @@ if start_button or st.session_state.is_translating:
         
         # 统一进度显示
         with st.expander("📊 翻译进度", expanded=True):
-            # 只使用一个进度条和一个状态文本
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
-            # 下载区域占位符
             download_placeholder = st.empty()
         
         # 实时日志
@@ -548,7 +520,7 @@ if start_button or st.session_state.is_translating:
         def update_log(message):
             timestamp = time.strftime('%H:%M:%S')
             all_logs.append(f"[{timestamp}] {message}")
-            recent_logs = all_logs[-10:]  # 只显示最新10条
+            recent_logs = all_logs[-10:]
             log_text = "\n".join(recent_logs)
             log_container_main.code(log_text, language=None)
         
@@ -558,217 +530,213 @@ if start_button or st.session_state.is_translating:
             update_log(f"═══════════════════════════════════════")
             update_log(f"🔄 开始处理文件 {file_num}/{total_files}: {uploaded_file.name}")
             
-            # 初始化当前文件状态
-            if total_files == 1:
-                status_text.text(f"准备翻译: {uploaded_file.name}")
-            else:
-                status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 准备中...")
-            
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
-                file_path = temp_path / uploaded_file.name
-                
-                try:
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    update_log("✅ 文件已保存到临时目录")
-                except Exception as e:
-                    update_log(f"❌ 保存文件失败: {e}")
-                    continue
-                
-                # 更新进度：文件保存完成
-                current_file_progress = 10
-                unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                progress_bar.progress(unified_progress / 100)
-                
+            # 为每个文件创建独立的临时目录
+            with tempfile.TemporaryDirectory() as temp_output_dir:
+                # 初始化当前文件状态
                 if total_files == 1:
-                    status_text.text(f"构建翻译命令... ({current_file_progress}%)")
+                    status_text.text(f"准备翻译: {uploaded_file.name}")
                 else:
-                    status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 构建翻译命令... ({current_file_progress}%)")
+                    status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 准备中...")
                 
-                # 构建命令
-                cmd = [
-                    "babeldoc", "--files", str(file_path),
-                    "--lang-in", lang_in, "--lang-out", lang_out,
-                    "--output", output_path, "--watermark-output-mode", watermark_mode,
-                    "--qps", str(qps)
-                ]
-                
-                # 添加参数
-                if pages: cmd.extend(["--pages", pages])
-                if no_dual: cmd.append("--no-dual")
-                if no_mono: cmd.append("--no-mono")
-                if only_translated: cmd.append("--only-include-translated-page")
-                if skip_scanned: cmd.append("--skip-scanned-detection")
-                if split_short_lines:
-                    cmd.append("--split-short-lines")
-                    cmd.extend(["--short-line-split-factor", str(short_line_factor)])
-                if translate_table: cmd.append("--translate-table-text")
-                if skip_clean: cmd.append("--skip-clean")
-                if enhance_compatibility: cmd.append("--enhance-compatibility")
-                if disable_rich_text: cmd.append("--disable-rich-text-translate")
-                if dual_translate_first: cmd.append("--dual-translate-first")
-                if ocr_workaround: cmd.append("--ocr-workaround")
-                if auto_ocr: cmd.append("--auto-enable-ocr-workaround")
-                if max_pages_per_part > 0: cmd.extend(["--max-pages-per-part", str(max_pages_per_part)])
-                
-                if use_openai and openai_key:
-                    cmd.extend([
-                        "--openai", "--openai-api-key", openai_key,
-                        "--openai-model", openai_model, "--openai-base-url", openai_base_url
-                    ])
-                    if custom_prompt: cmd.extend(["--custom-system-prompt", custom_prompt])
-                
-                update_log("🚀 开始执行翻译命令...")
-                update_log(f"📝 翻译配置: {lang_in} → {lang_out}")
-                update_log(f"🤖 使用模型: {openai_model if use_openai else '本地模型'}")
-                
-                # 更新进度：开始翻译
-                current_file_progress = 15
-                unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                progress_bar.progress(unified_progress / 100)
-                
-                if total_files == 1:
-                    status_text.text(f"正在执行翻译... ({current_file_progress}%)")
-                else:
-                    status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 正在执行翻译... ({current_file_progress}%)")
-                
-                start_time = time.time()
-                output_queue = queue.Queue()
-                
-                translate_thread = threading.Thread(
-                    target=run_translation_with_queue, args=(cmd, output_queue))
-                translate_thread.start()
-                
-                # 实时进度监控
-                returncode = None
-                stderr = ""
-                last_progress_time = time.time()
-                
-                while True:
+                with tempfile.TemporaryDirectory() as temp_input_dir:
+                    temp_path = Path(temp_input_dir)
+                    file_path = temp_path / uploaded_file.name
+                    
                     try:
-                        msg = output_queue.get(timeout=0.1)
-                        msg_type = msg[0]
-                        
-                        if msg_type == 'output':
-                            line = msg[1]
-                            is_stderr = msg[2]
-                            detected_progress = msg[3]
-                            
-                            if is_stderr:
-                                stderr += line + "\n"
-                            
-                            # 更新日志
-                            if line.strip():
-                                update_log(f"📝 {line}")
-                            
-                            # 根据输出更新进度
-                            if detected_progress is not None:
-                                if detected_progress == -1:  # 错误
-                                    update_log(f"❌ 检测到错误: {line}")
-                                else:
-                                    # 确保进度只增不减
-                                    if detected_progress > current_file_progress:
-                                        current_file_progress = min(detected_progress, 95)
-                                        unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                                        progress_bar.progress(unified_progress / 100)
-                                        
-                                        # 更新状态文本
-                                        if current_file_progress < 30:
-                                            stage = "📖 正在解析PDF文档..."
-                                        elif current_file_progress < 70:
-                                            stage = "🔤 正在翻译文本内容..."
-                                        elif current_file_progress < 90:
-                                            stage = "📝 正在生成翻译文档..."
-                                        else:
-                                            stage = "💾 正在保存文件..."
-                                        
-                                        if total_files == 1:
-                                            status_text.text(f"{stage} ({current_file_progress}%)")
-                                        else:
-                                            status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - {stage} ({current_file_progress}%)")
-                        
-                        elif msg_type == 'done':
-                            returncode = msg[1]
-                            break
-                            
-                        elif msg_type == 'error':
-                            error_msg = msg[1]
-                            update_log(f"❌ {error_msg}")
-                            returncode = -1
-                            break
-                            
-                    except queue.Empty:
-                        # 超时处理 - 缓慢推进进度（避免卡住的感觉）
-                        current_time = time.time()
-                        if current_time - last_progress_time > 2 and current_file_progress < 85:
-                            current_file_progress += 1
-                            unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                            progress_bar.progress(unified_progress / 100)
-                            last_progress_time = current_time
-                        
-                        # 检查超时（5分钟）
-                        if current_time - start_time > 300:
-                            update_log("⚠️ 翻译超时，强制退出")
-                            returncode = -1
-                            break
-                
-                translate_thread.join(timeout=5)
-                elapsed_time = time.time() - start_time
-                update_log(f"⏱️ 翻译耗时: {elapsed_time:.1f}秒")
-                
-                # 查找输出文件
-                current_file_progress = 90
-                unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                progress_bar.progress(unified_progress / 100)
-                
-                if total_files == 1:
-                    status_text.text(f"🔍 正在检查输出文件... ({current_file_progress}%)")
-                else:
-                    status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 🔍 正在检查输出文件... ({current_file_progress}%)")
-                
-                update_log("🔍 正在查找输出文件...")
-                output_files = find_output_files(output_path, uploaded_file.name)
-                
-                if returncode == 0 and output_files:
-                    # 完成当前文件
-                    current_file_progress = 100
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        update_log("✅ 文件已保存到临时目录")
+                    except Exception as e:
+                        update_log(f"❌ 保存文件失败: {e}")
+                        continue
+                    
+                    # 更新进度：文件保存完成
+                    current_file_progress = 10
                     unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
                     progress_bar.progress(unified_progress / 100)
                     
                     if total_files == 1:
-                        status_text.text("✅ 翻译完成")
+                        status_text.text(f"构建翻译命令... ({current_file_progress}%)")
                     else:
-                        status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - ✅ 翻译完成")
+                        status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 构建翻译命令... ({current_file_progress}%)")
                     
-                    successful_files += 1
+                    # 构建命令 - 使用临时输出目录
+                    cmd = [
+                        "babeldoc", "--files", str(file_path),
+                        "--lang-in", lang_in, "--lang-out", lang_out,
+                        "--output", temp_output_dir,  # 使用临时目录
+                        "--watermark-output-mode", watermark_mode,
+                        "--qps", str(qps)
+                    ]
                     
-                    # 保存结果到session state
-                    for file_path in output_files:
-                        if file_path.exists():
-                            st.session_state.translation_results.append({
-                                'original_name': uploaded_file.name,
-                                'translated_name': file_path.name,
-                                'file_path': file_path,
-                                'size': file_path.stat().st_size
-                            })
+                    # 添加参数
+                    if pages: cmd.extend(["--pages", pages])
+                    if no_dual: cmd.append("--no-dual")
+                    if no_mono: cmd.append("--no-mono")
+                    if only_translated: cmd.append("--only-include-translated-page")
+                    if skip_scanned: cmd.append("--skip-scanned-detection")
+                    if split_short_lines:
+                        cmd.append("--split-short-lines")
+                        cmd.extend(["--short-line-split-factor", str(short_line_factor)])
+                    if translate_table: cmd.append("--translate-table-text")
+                    if skip_clean: cmd.append("--skip-clean")
+                    if enhance_compatibility: cmd.append("--enhance-compatibility")
+                    if disable_rich_text: cmd.append("--disable-rich-text-translate")
+                    if dual_translate_first: cmd.append("--dual-translate-first")
+                    if ocr_workaround: cmd.append("--ocr-workaround")
+                    if auto_ocr: cmd.append("--auto-enable-ocr-workaround")
+                    if max_pages_per_part > 0: cmd.extend(["--max-pages-per-part", str(max_pages_per_part)])
                     
-                    update_log(f"✅ 翻译成功完成!")
-                    update_log(f"📁 输出文件: {[f.name for f in output_files]}")
-                    update_log(f"📍 保存位置: {output_path}")
-                else:
+                    if use_openai and openai_key:
+                        cmd.extend([
+                            "--openai", "--openai-api-key", openai_key,
+                            "--openai-model", openai_model, "--openai-base-url", openai_base_url
+                        ])
+                        if custom_prompt: cmd.extend(["--custom-system-prompt", custom_prompt])
+                    
+                    update_log("🚀 开始执行翻译命令...")
+                    update_log(f"📝 翻译配置: {lang_in} → {lang_out}")
+                    update_log(f"🤖 使用模型: {openai_model if use_openai else '本地模型'}")
+                    
+                    # 更新进度：开始翻译
+                    current_file_progress = 15
+                    unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                    progress_bar.progress(unified_progress / 100)
+                    
                     if total_files == 1:
-                        status_text.text("❌ 翻译失败")
+                        status_text.text(f"正在执行翻译... ({current_file_progress}%)")
                     else:
-                        status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - ❌ 翻译失败")
+                        status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 正在执行翻译... ({current_file_progress}%)")
                     
-                    update_log(f"❌ 翻译失败! 返回码: {returncode}")
+                    start_time = time.time()
+                    output_queue = queue.Queue()
                     
-                    if stderr:
-                        error_lines = stderr.strip().split('\n')
-                        for line in error_lines[-3:]:
-                            if line.strip():
-                                update_log(f"🚨 错误: {line.strip()}")
+                    translate_thread = threading.Thread(
+                        target=run_translation_with_queue, args=(cmd, output_queue))
+                    translate_thread.start()
+                    
+                    # 实时进度监控
+                    returncode = None
+                    stderr = ""
+                    last_progress_time = time.time()
+                    
+                    while True:
+                        try:
+                            msg = output_queue.get(timeout=0.1)
+                            msg_type = msg[0]
+                            
+                            if msg_type == 'output':
+                                line = msg[1]
+                                is_stderr = msg[2]
+                                detected_progress = msg[3]
+                                
+                                if is_stderr:
+                                    stderr += line + "\n"
+                                
+                                # 更新日志
+                                if line.strip():
+                                    update_log(f"📝 {line}")
+                                
+                                # 根据输出更新进度
+                                if detected_progress is not None:
+                                    if detected_progress == -1:  # 错误
+                                        update_log(f"❌ 检测到错误: {line}")
+                                    else:
+                                        # 确保进度只增不减
+                                        if detected_progress > current_file_progress:
+                                            current_file_progress = min(detected_progress, 95)
+                                            unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                                            progress_bar.progress(unified_progress / 100)
+                                            
+                                            # 更新状态文本
+                                            if current_file_progress < 30:
+                                                stage = "📖 正在解析PDF文档..."
+                                            elif current_file_progress < 70:
+                                                stage = "🔤 正在翻译文本内容..."
+                                            elif current_file_progress < 90:
+                                                stage = "📝 正在生成翻译文档..."
+                                            else:
+                                                stage = "💾 正在保存文件..."
+                                            
+                                            if total_files == 1:
+                                                status_text.text(f"{stage} ({current_file_progress}%)")
+                                            else:
+                                                status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - {stage} ({current_file_progress}%)")
+                            
+                            elif msg_type == 'done':
+                                returncode = msg[1]
+                                break
+                                
+                            elif msg_type == 'error':
+                                error_msg = msg[1]
+                                update_log(f"❌ {error_msg}")
+                                returncode = -1
+                                break
+                                
+                        except queue.Empty:
+                            # 超时处理 - 缓慢推进进度（避免卡住的感觉）
+                            current_time = time.time()
+                            if current_time - last_progress_time > 2 and current_file_progress < 85:
+                                current_file_progress += 1
+                                unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                                progress_bar.progress(unified_progress / 100)
+                                last_progress_time = current_time
+                            
+                            # 检查超时（5分钟）
+                            if current_time - start_time > 300:
+                                update_log("⚠️ 翻译超时，强制退出")
+                                returncode = -1
+                                break
+                    
+                    translate_thread.join(timeout=5)
+                    elapsed_time = time.time() - start_time
+                    update_log(f"⏱️ 翻译耗时: {elapsed_time:.1f}秒")
+                    
+                    # 查找并读取输出文件
+                    current_file_progress = 90
+                    unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                    progress_bar.progress(unified_progress / 100)
+                    
+                    if total_files == 1:
+                        status_text.text(f"🔍 正在处理输出文件... ({current_file_progress}%)")
+                    else:
+                        status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 🔍 正在处理输出文件... ({current_file_progress}%)")
+                    
+                    update_log("🔍 正在读取输出文件...")
+                    output_files = find_and_read_output_files(temp_output_dir, uploaded_file.name)
+                    
+                    if returncode == 0 and output_files:
+                        # 完成当前文件
+                        current_file_progress = 100
+                        unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                        progress_bar.progress(unified_progress / 100)
+                        
+                        if total_files == 1:
+                            status_text.text("✅ 翻译完成")
+                        else:
+                            status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - ✅ 翻译完成")
+                        
+                        successful_files += 1
+                        
+                        # 保存结果到session state（已读取到内存）
+                        st.session_state.translation_results.extend(output_files)
+                        
+                        update_log(f"✅ 翻译成功完成!")
+                        update_log(f"📁 输出文件: {[f['translated_name'] for f in output_files]}")
+                        update_log(f"📦 文件已读取到内存，临时文件将自动清理")
+                    else:
+                        if total_files == 1:
+                            status_text.text("❌ 翻译失败")
+                        else:
+                            status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - ❌ 翻译失败")
+                        
+                        update_log(f"❌ 翻译失败! 返回码: {returncode}")
+                        
+                        if stderr:
+                            error_lines = stderr.strip().split('\n')
+                            for line in error_lines[-3:]:
+                                if line.strip():
+                                    update_log(f"🚨 错误: {line.strip()}")
         
         # 完成所有文件处理
         update_log(f"═══════════════════════════════════════")
@@ -777,10 +745,7 @@ if start_button or st.session_state.is_translating:
         
         update_log(f"🎉 所有文件处理完成!")
         update_log(f"📊 成功率: {successful_files}/{total_files} ({int(successful_files/total_files*100) if total_files > 0 else 0}%)")
-        update_log(f"📁 输出目录: {output_path}")
-        
-        # 翻译完成，重置状态
-        st.session_state.is_translating = False
+        update_log(f"🧹 所有临时文件已自动清理")
         
         if successful_files > 0:
             st.balloons()
@@ -812,15 +777,14 @@ with st.expander("📖 使用说明"):
     - 可通过环境变量或Streamlit Secrets配置
     - 支持在界面中直接输入
     
+    **文件安全：**
+    - 每次翻译使用独立的临时目录
+    - 翻译完成后文件立即读取到内存
+    - 临时文件自动清理，保证用户隔离
+    
     **下载说明：**
     - 翻译完成后自动显示下载按钮
     - 下载按钮点击后不会消失，直到下次翻译开始
     - 支持单个文件下载和批量ZIP下载
-    - 文件会自动保存到指定目录并提供下载
-    
-    **进度显示：**
-    - 统一进度条显示翻译进度
-    - 单文件时显示该文件的翻译进度
-    - 多文件时显示整体完成度
-    - 实时监控babeldoc输出，显示真实翻译进度
+    - 所有文件处理都在内存中完成，安全可靠
     """)
