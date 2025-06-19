@@ -43,13 +43,6 @@ st.markdown("""
     display: block;
 }
 
-/* 进度条百分比样式 */
-.progress-text {
-    text-align: center;
-    font-weight: bold;
-    margin-bottom: 0.5rem;
-}
-
 /* 移除各种边框 */
 div[data-testid="stSelectbox"] > div,
 div[data-testid="stFileUploader"],
@@ -291,7 +284,7 @@ def display_download_section(results):
                     data=file_data,
                     file_name=result['translated_name'],
                     mime="application/pdf",
-                    key=f"download_{result['translated_name']}_{i}"
+                    key=f"download_{result['translated_name']}_{i}_{int(time.time())}"
                 )
             except Exception as e:
                 st.error(f"读取文件失败: {e}")
@@ -307,12 +300,16 @@ def display_download_section(results):
                 data=zip_data,
                 file_name=f"translated_pdfs_{int(time.time())}.zip",
                 mime="application/zip",
-                key="download_all_zip"
+                key=f"download_all_zip_{int(time.time())}"
             )
         except Exception as e:
             st.error(f"创建ZIP文件失败: {e}")
     
     st.markdown('</div>', unsafe_allow_html=True)
+
+# 初始化会话状态
+if 'translation_results' not in st.session_state:
+    st.session_state.translation_results = []
 
 # 显示应用标题
 st.markdown(
@@ -331,9 +328,6 @@ uploaded_files = st.file_uploader(
 
 # 开始翻译按钮
 start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files)
-
-# 进度条占位符
-progress_placeholder = st.empty()
 
 # 语言设置
 with st.expander("🌍 语言设置", expanded=True):
@@ -492,8 +486,16 @@ with st.expander("🔧 高级选项"):
         max_pages_per_part = st.number_input("每部分最大页数", 
             value=0, min_value=0, max_value=1000, help="分割翻译的每部分最大页数，0表示不分割")
 
+# 显示之前的下载结果（如果有）
+if st.session_state.translation_results:
+    st.markdown("---")
+    display_download_section(st.session_state.translation_results)
+
 # 翻译处理逻辑
 if start_button:
+    # 清空之前的下载结果
+    st.session_state.translation_results = []
+    
     if use_openai and not openai_key:
         st.error("❌ 请输入API Key")
         st.stop()
@@ -508,16 +510,13 @@ if start_button:
         st.error(f"❌ 创建输出目录失败: {e}")
         st.stop()
     
-    # 初始化会话状态
-    if 'translation_results' not in st.session_state:
-        st.session_state.translation_results = []
-    
-    st.session_state.translation_results = []  # 清空之前的结果
+    # 进度条占位符
+    progress_placeholder = st.empty()
     
     with progress_placeholder.container():
         # 统一进度显示
         with st.expander("📊 翻译进度", expanded=True):
-            progress_text = st.empty()
+            # 只使用一个进度条和一个状态文本
             progress_bar = st.progress(0)
             status_text = st.empty()
             
@@ -566,7 +565,6 @@ if start_button:
                 # 更新进度：文件保存完成
                 current_file_progress = 10
                 unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
                 progress_bar.progress(unified_progress / 100)
                 
                 if total_files == 1:
@@ -614,7 +612,6 @@ if start_button:
                 # 更新进度：开始翻译
                 current_file_progress = 15
                 unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
                 progress_bar.progress(unified_progress / 100)
                 
                 if total_files == 1:
@@ -660,7 +657,6 @@ if start_button:
                                     if detected_progress > current_file_progress:
                                         current_file_progress = min(detected_progress, 95)
                                         unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                                        progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
                                         progress_bar.progress(unified_progress / 100)
                                         
                                         # 更新状态文本
@@ -710,7 +706,6 @@ if start_button:
                 # 查找输出文件
                 current_file_progress = 90
                 unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
                 progress_bar.progress(unified_progress / 100)
                 
                 if total_files == 1:
@@ -725,7 +720,6 @@ if start_button:
                     # 完成当前文件
                     current_file_progress = 100
                     unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
-                    progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
                     progress_bar.progress(unified_progress / 100)
                     
                     if total_files == 1:
@@ -764,7 +758,6 @@ if start_button:
         
         # 完成所有文件处理
         update_log(f"═══════════════════════════════════════")
-        progress_text.markdown(f'<div class="progress-text">进度: 100% ✅ 处理完成!</div>', unsafe_allow_html=True)
         progress_bar.progress(1.0)
         status_text.text(f"🎉 处理完成! 成功: {successful_files}/{total_files}")
         
@@ -803,12 +796,13 @@ with st.expander("📖 使用说明"):
     - 支持在界面中直接输入
     
     **下载说明：**
-    - 翻译完成后自动在进度区域显示下载按钮
+    - 翻译完成后自动显示下载按钮
+    - 下载按钮点击后不会消失，直到下次翻译开始
     - 支持单个文件下载和批量ZIP下载
     - 文件会自动保存到指定目录并提供下载
     
     **进度显示：**
-    - 统一进度条显示总体翻译进度
+    - 统一进度条显示翻译进度
     - 单文件时显示该文件的翻译进度
     - 多文件时显示整体完成度
     - 实时监控babeldoc输出，显示真实翻译进度
