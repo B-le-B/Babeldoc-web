@@ -8,6 +8,10 @@ import time
 import threading
 import queue
 
+# 设置无头环境变量（必须在导入matplotlib之前）
+os.environ['MPLBACKEND'] = 'Agg'
+os.environ['DISPLAY'] = ''
+
 # 加载.env文件
 try:
     load_dotenv()
@@ -137,6 +141,16 @@ div[data-testid="stFileUploader"] section > div {
     border-radius: 5px;
     margin-bottom: 1rem;
 }
+
+/* 环境检查样式 */
+.env-check {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    color: #495057;
+    padding: 12px;
+    border-radius: 5px;
+    margin-bottom: 1rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -168,6 +182,24 @@ MODEL_PROVIDERS = {
         "model": ""
     }
 }
+
+def setup_headless_environment():
+    """设置无头环境"""
+    # 设置matplotlib为无头模式
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+    except ImportError:
+        pass
+    
+    # 设置OpenCV为无头模式
+    os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
+    
+    # 禁用GUI相关的环境变量
+    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    
+    # 设置其他可能需要的环境变量
+    os.environ['PYTHONUNBUFFERED'] = '1'
 
 def get_api_key_for_provider(provider_name):
     """根据服务商获取对应的API Key"""
@@ -218,7 +250,9 @@ def is_cloud_environment():
         'STREAMLIT_CLOUD',
         'HEROKU_APP_NAME',
         'RAILWAY_ENVIRONMENT',
-        'VERCEL'
+        'VERCEL',
+        'CODESPACE_NAME',
+        'GITPOD_WORKSPACE_ID'
     ]
     
     for indicator in cloud_indicators:
@@ -241,16 +275,45 @@ def get_default_output_path():
         # 本地环境使用当前目录下的子目录
         return os.path.join(os.getcwd(), "translate_output")
 
+def check_system_dependencies():
+    """检查系统依赖"""
+    dependencies = {
+        'babeldoc': 'babeldoc --version',
+        'python': 'python --version',
+        'pip': 'pip --version'
+    }
+    
+    results = {}
+    for name, cmd in dependencies.items():
+        try:
+            result = subprocess.run(cmd.split(), capture_output=True, text=True, timeout=5)
+            results[name] = result.returncode == 0
+        except:
+            results[name] = False
+    
+    return results
+
 def run_translation_with_queue(cmd, output_queue):
     """运行翻译命令，通过队列传递输出"""
     try:
+        # 设置无头环境变量
+        env = os.environ.copy()
+        env.update({
+            'MPLBACKEND': 'Agg',
+            'DISPLAY': '',
+            'QT_QPA_PLATFORM': 'offscreen',
+            'OPENCV_IO_ENABLE_OPENEXR': '0',
+            'PYTHONUNBUFFERED': '1'
+        })
+        
         process = subprocess.Popen(
             cmd, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE, 
             text=True,
             universal_newlines=True,
-            bufsize=1  # 行缓冲
+            bufsize=1,  # 行缓冲
+            env=env  # 使用修改后的环境变量
         )
         
         stdout_lines = []
@@ -293,6 +356,9 @@ def get_file_stem(filename):
     """从文件名获取不带扩展名的部分"""
     return Path(filename).stem
 
+# 初始化无头环境
+setup_headless_environment()
+
 # 显示应用标题
 st.markdown(
     """
@@ -301,15 +367,32 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 检测云端环境并显示提示
-if is_cloud_environment():
-    st.markdown("""
-    <div class="cloud-info">
-        <strong>☁️ 云端环境检测到</strong><br>
-        应用正在云端环境中运行，输出文件将保存到临时目录。<br>
-        请确保已通过环境变量或Streamlit Secrets配置API密钥。
-    </div>
-    """, unsafe_allow_html=True)
+# 检测运行环境并显示信息
+is_cloud = is_cloud_environment()
+
+# 环境检查
+with st.expander("🔧 环境检查", expanded=False):
+    if is_cloud:
+        st.markdown("""
+        <div class="cloud-info">
+            <strong>☁️ 云端环境检测到</strong><br>
+            应用正在云端环境中运行，已自动配置无头模式。<br>
+            输出文件将保存到临时目录，请及时下载。
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="env-check">
+            <strong>💻 本地环境检测到</strong><br>
+            应用在本地环境中运行。
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # 检查系统依赖
+    deps = check_system_dependencies()
+    for name, status in deps.items():
+        status_icon = "✅" if status else "❌"
+        st.write(f"{status_icon} {name}: {'可用' if status else '不可用'}")
 
 # 文件上传
 uploaded_files = st.file_uploader(
@@ -469,7 +552,7 @@ with st.expander("⚙️ 基本设置", expanded=True):
         col_suggest1, col_suggest2 = st.columns(2)
         with col_suggest1:
             if st.button("📁 使用临时目录", help="使用系统临时目录"):
-                st.session_state.output_path = "/tmp/translate_output" if is_cloud_environment() else "./temp_translate"
+                st.session_state.output_path = "/tmp/translate_output" if is_cloud else "./temp_translate"
                 st.rerun()
         
         with col_suggest2:
@@ -673,6 +756,7 @@ if start_button:
                 update_log("🚀 开始执行翻译命令...")
                 update_log(f"📝 翻译配置: {lang_in} → {lang_out}")
                 update_log(f"🤖 使用模型: {openai_model if use_openai else '本地模型'}")
+                update_log(f"🔧 无头模式: {'已启用' if is_cloud else '未启用'}")
                 
                 current_progress_text.markdown(f'<div class="progress-text">当前文件: 20%</div>', unsafe_allow_html=True)
                 current_progress.progress(0.2)
@@ -832,7 +916,7 @@ if start_button:
             st.success(f"📁 翻译结果保存在: {output_path}")
             
             # 在云端环境提供额外提示
-            if is_cloud_environment():
+            if is_cloud:
                 st.info("☁️ 云端环境提示: 翻译完成的文件保存在临时目录中，请及时下载。")
         else:
             st.error("❌ 没有文件成功翻译，请检查配置和日志")
@@ -854,33 +938,49 @@ with st.expander("📖 使用说明"):
     - **OpenAI**: 官方ChatGPT服务
     - **自定义**: 手动配置其他服务商
     
-    **模型名称：**
-    - 可以使用推荐模型，也可以修改为该服务商支持的其他模型
-    - 例如SiliconFlow还支持: `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-Coder-32B-Instruct` 等
-    
     **云端部署配置：**
     - **环境变量方式**: 在部署平台设置环境变量
     - **Streamlit Secrets**: 在`.streamlit/secrets.toml`文件中配置
     - **输出路径**: 云端环境建议使用`/tmp/`开头的临时目录
     
-    **API Key配置 (.env文件)：**
+    **必需文件：**
+    - `requirements.txt`: Python依赖
+    - `packages.txt`: 系统依赖（解决libGL.so.1问题）
+    
+    **requirements.txt示例：**
     ```
+    streamlit
+    python-dotenv
+    babeldoc
+    matplotlib-base
+    opencv-python-headless
+    ```
+    
+    **packages.txt示例：**
+    ```
+    libgl1-mesa-glx
+    libglib2.0-0
+    libsm6
+    libxext6
+    libxrender-dev
+    libgomp1
+    ```
+    
+    **API Key配置方式：**
+    
+    1. **环境变量：**
+    ```bash
     SILICONFLOW_API_KEY=your_key_here
     MODELSCOPE_API_KEY=your_key_here  
     OPENROUTER_API_KEY=your_key_here
     OPENAI_API_KEY=your_key_here
     ```
     
-    **Streamlit Secrets配置 (.streamlit/secrets.toml)：**
+    2. **Streamlit Secrets：**
     ```toml
     SILICONFLOW_API_KEY = "your_key_here"
     MODELSCOPE_API_KEY = "your_key_here"
     OPENROUTER_API_KEY = "your_key_here"
     OPENAI_API_KEY = "your_key_here"
     ```
-    
-    **部署要求：**
-    - 确保目标环境已安装`babeldoc`工具
-    - 在`requirements.txt`中添加必要依赖
-    - 配置适当的环境变量或Secrets
     """)
