@@ -311,6 +311,9 @@ def display_download_section(results):
 if 'translation_results' not in st.session_state:
     st.session_state.translation_results = []
 
+if 'is_translating' not in st.session_state:
+    st.session_state.is_translating = False
+
 # 显示应用标题
 st.markdown(
     """
@@ -328,6 +331,11 @@ uploaded_files = st.file_uploader(
 
 # 开始翻译按钮
 start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files)
+
+# 如果点击了翻译按钮，立即设置翻译状态并清空缓存
+if start_button:
+    st.session_state.is_translating = True
+    st.session_state.translation_results = []
 
 # 立即预留进度和日志显示位置
 progress_log_placeholder = st.empty()
@@ -469,7 +477,7 @@ with st.expander("⚙️ 文档处理选项"):
         
     with col6:
         short_line_factor = st.number_input("短行分割阈值", 
-            value=1.2, min_value=0.1, max_value=5.0, step=0.1, help="短行分割的阈值因子")
+            value=0.8, min_value=0.1, max_value=5.0, step=0.1, help="短行分割的阈值因子")
         qps = st.slider("翻译速度限制 (QPS)", 1, 20, 3, 
             help="每秒查询数限制，默认3，过高可能被限流")
         skip_clean = st.checkbox("跳过PDF清理", help="跳过PDF清理步骤")
@@ -489,24 +497,23 @@ with st.expander("🔧 高级选项"):
         max_pages_per_part = st.number_input("每部分最大页数", 
             value=0, min_value=0, max_value=1000, help="分割翻译的每部分最大页数，0表示不分割")
 
-# 显示之前的下载结果（只在没有点击翻译时显示）
-if st.session_state.translation_results and not start_button:
+# 显示之前的下载结果（只在没有翻译进行中时显示）
+if st.session_state.translation_results and not st.session_state.is_translating:
     st.markdown("---")
     display_download_section(st.session_state.translation_results)
 
 # 翻译处理逻辑 - 在占位符中显示
-if start_button:
-    # 立即清空之前的下载结果
-    st.session_state.translation_results = []
-    
+if start_button or st.session_state.is_translating:
     if use_openai and not openai_key:
         with progress_log_placeholder.container():
             st.error("❌ 请输入API Key")
+        st.session_state.is_translating = False
         st.stop()
     
     if not output_path:
         with progress_log_placeholder.container():
             st.error("❌ 请设置输出路径")
+        st.session_state.is_translating = False
         st.stop()
     
     try:
@@ -514,6 +521,7 @@ if start_button:
     except Exception as e:
         with progress_log_placeholder.container():
             st.error(f"❌ 创建输出目录失败: {e}")
+        st.session_state.is_translating = False
         st.stop()
     
     # 在占位符中显示进度和日志
@@ -770,6 +778,9 @@ if start_button:
         update_log(f"🎉 所有文件处理完成!")
         update_log(f"📊 成功率: {successful_files}/{total_files} ({int(successful_files/total_files*100) if total_files > 0 else 0}%)")
         update_log(f"📁 输出目录: {output_path}")
+        
+        # 翻译完成，重置状态
+        st.session_state.is_translating = False
         
         if successful_files > 0:
             st.balloons()
