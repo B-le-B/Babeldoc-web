@@ -128,11 +128,11 @@ div[data-testid="stFileUploader"] section > div {
     margin-top: 1.65rem;
 }
 
-/* 警告信息样式 */
-.deployment-warning {
-    background-color: #fff3cd;
-    border: 1px solid #ffeaa7;
-    color: #856404;
+/* 云端部署提示样式 */
+.cloud-info {
+    background-color: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    color: #0056b3;
     padding: 12px;
     border-radius: 5px;
     margin-bottom: 1rem;
@@ -181,7 +181,17 @@ def get_api_key_for_provider(provider_name):
     if api_key:
         return api_key
     
-    # 从用户配置目录读取（仅在本地环境中尝试）
+    # 尝试从Streamlit secrets读取
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            api_key = st.secrets.get(env_var, "")
+            if api_key:
+                return api_key
+    except:
+        pass
+    
+    # 从用户配置目录读取（仅在非云端环境）
     try:
         config_paths = [
             Path.home() / '.config' / 'babeldoc' / f'{env_var.lower()}.txt',
@@ -200,14 +210,36 @@ def get_api_key_for_provider(provider_name):
     
     return ""
 
-def check_babeldoc_availability():
-    """检查babeldoc命令是否可用"""
-    try:
-        result = subprocess.run(['babeldoc', '--version'], 
-                              capture_output=True, text=True, timeout=5)
-        return result.returncode == 0
-    except:
-        return False
+def is_cloud_environment():
+    """检测是否在云端环境运行"""
+    cloud_indicators = [
+        'STREAMLIT_SHARING_MODE',
+        'STREAMLIT_SERVER_PORT', 
+        'STREAMLIT_CLOUD',
+        'HEROKU_APP_NAME',
+        'RAILWAY_ENVIRONMENT',
+        'VERCEL'
+    ]
+    
+    for indicator in cloud_indicators:
+        if os.environ.get(indicator):
+            return True
+    
+    # 检查服务器地址
+    server_address = os.environ.get('STREAMLIT_SERVER_ADDRESS', '')
+    if any(cloud_domain in server_address for cloud_domain in ['streamlit.io', 'herokuapp.com', 'railway.app']):
+        return True
+    
+    return False
+
+def get_default_output_path():
+    """获取默认输出路径"""
+    if is_cloud_environment():
+        # 云端环境使用临时目录
+        return "/tmp/translate_output"
+    else:
+        # 本地环境使用当前目录下的子目录
+        return os.path.join(os.getcwd(), "translate_output")
 
 def run_translation_with_queue(cmd, output_queue):
     """运行翻译命令，通过队列传递输出"""
@@ -233,8 +265,8 @@ def run_translation_with_queue(cmd, output_queue):
                         lines_list.append(line)
                         # 将输出放入队列
                         output_queue.put(('output', line, is_stderr))
-            except:
-                pass
+            except Exception as e:
+                output_queue.put(('error', f"读取输出流错误: {str(e)}", is_stderr))
         
         stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines, False))
         stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines, True))
@@ -254,17 +286,12 @@ def run_translation_with_queue(cmd, output_queue):
         return returncode, '\n'.join(stdout_lines), '\n'.join(stderr_lines)
         
     except Exception as e:
-        output_queue.put(('error', str(e), None))
+        output_queue.put(('error', f"执行命令错误: {str(e)}", None))
         return -1, "", str(e)
 
 def get_file_stem(filename):
     """从文件名获取不带扩展名的部分"""
     return Path(filename).stem
-
-# 检查运行环境
-is_cloud_deployment = os.environ.get('STREAMLIT_SHARING_MODE') or \
-                     os.environ.get('STREAMLIT_SERVER_PORT') or \
-                     'streamlit.io' in os.environ.get('STREAMLIT_SERVER_ADDRESS', '')
 
 # 显示应用标题
 st.markdown(
@@ -274,23 +301,15 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# 显示部署环境警告
-if is_cloud_deployment:
+# 检测云端环境并显示提示
+if is_cloud_environment():
     st.markdown("""
-    <div class="deployment-warning">
-        <strong>⚠️ 云端部署提醒:</strong><br>
-        此应用在云端环境中运行，需要确保以下条件：<br>
-        1. 云端服务器已安装 <code>babeldoc</code> 命令<br>
-        2. 具有足够的系统权限执行文件操作<br>
-        3. API密钥通过环境变量或Streamlit Secrets配置
+    <div class="cloud-info">
+        <strong>☁️ 云端环境检测到</strong><br>
+        应用正在云端环境中运行，输出文件将保存到临时目录。<br>
+        请确保已通过环境变量或Streamlit Secrets配置API密钥。
     </div>
     """, unsafe_allow_html=True)
-
-# 检查babeldoc可用性
-babeldoc_available = check_babeldoc_availability()
-if not babeldoc_available:
-    st.error("❌ 未找到babeldoc命令，请确保已正确安装babeldoc工具")
-    st.info("💡 安装方法: `pip install babeldoc`")
 
 # 文件上传
 uploaded_files = st.file_uploader(
@@ -300,7 +319,7 @@ uploaded_files = st.file_uploader(
 )
 
 # 开始翻译按钮
-start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files or not babeldoc_available)
+start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files)
 
 # 进度条占位符
 progress_placeholder = st.empty()
@@ -410,15 +429,6 @@ with st.expander("🤖 大模型设置"):
             
         with col8:
             auto_key = get_api_key_for_provider(selected_provider)
-            
-            # 尝试从Streamlit secrets获取API密钥
-            try:
-                secrets_key = st.secrets.get(provider_config["api_key_env"], "")
-                if secrets_key and not auto_key:
-                    auto_key = secrets_key
-            except:
-                pass
-                
             openai_key = st.text_input("API Key", 
                 value=auto_key,
                 type="password",
@@ -444,24 +454,26 @@ with st.expander("⚙️ 基本设置", expanded=True):
         pages = st.text_input("页面范围", "", placeholder="例: 1-5,8,10-")
         
     with col2:
-        # 简化输出路径处理，移除文件夹选择按钮（云端不可用）
+        # 初始化输出路径
         if 'output_path' not in st.session_state:
-            # 设置默认输出路径
-            if is_cloud_deployment:
-                st.session_state.output_path = "/tmp/translate_output"
-            else:
-                st.session_state.output_path = "./translate_output"
+            st.session_state.output_path = get_default_output_path()
         
         output_path = st.text_input(
             "输出路径", 
             value=st.session_state.output_path,
-            help="云端部署时建议使用 /tmp/ 开头的路径",
+            help="翻译后的PDF文件保存路径",
             key="output_path_input"
         )
         
-        # 如果不是云端部署，提供重置为默认路径的按钮
-        if not is_cloud_deployment:
-            if st.button("📁 重置为默认路径", help="重置为当前目录下的translate_output"):
+        # 提供路径建议
+        col_suggest1, col_suggest2 = st.columns(2)
+        with col_suggest1:
+            if st.button("📁 使用临时目录", help="使用系统临时目录"):
+                st.session_state.output_path = "/tmp/translate_output" if is_cloud_environment() else "./temp_translate"
+                st.rerun()
+        
+        with col_suggest2:
+            if st.button("🏠 使用当前目录", help="使用当前工作目录"):
                 st.session_state.output_path = "./translate_output"
                 st.rerun()
 
@@ -533,6 +545,7 @@ if start_button:
     
     try:
         os.makedirs(output_path, exist_ok=True)
+        st.success(f"✅ 输出目录已创建: {output_path}")
     except Exception as e:
         st.error(f"❌ 创建输出目录失败: {e}")
         st.stop()
@@ -596,6 +609,7 @@ if start_button:
                 try:
                     with open(file_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
+                    update_log("✅ 文件已保存到临时目录")
                 except Exception as e:
                     update_log(f"❌ 保存文件失败: {e}")
                     continue
@@ -603,7 +617,6 @@ if start_button:
                 current_progress_text.markdown(f'<div class="progress-text">当前文件: 10%</div>', unsafe_allow_html=True)
                 current_progress.progress(0.1)
                 current_status.text("构建翻译命令...")
-                update_log("✅ 文件已保存到临时目录")
                 
                 # 构建命令
                 cmd = [
@@ -692,6 +705,9 @@ if start_button:
                 stderr = ""
                 
                 # 主循环处理队列消息
+                max_wait_time = 300  # 最大等待时间5分钟
+                wait_start = time.time()
+                
                 while True:
                     try:
                         # 非阻塞获取消息
@@ -720,6 +736,12 @@ if start_button:
                             break
                             
                     except queue.Empty:
+                        # 检查超时
+                        if time.time() - wait_start > max_wait_time:
+                            update_log("⚠️ 翻译超时，强制退出")
+                            returncode = -1
+                            break
+                        
                         # 队列为空，更新进度
                         if current_step < len(progress_steps):
                             progress, status_text = progress_steps[current_step]
@@ -729,7 +751,7 @@ if start_button:
                             current_step += 1
                 
                 # 等待线程结束
-                translate_thread.join()
+                translate_thread.join(timeout=5)
                 
                 elapsed_time = time.time() - start_time
                 update_log(f"⏱️ 翻译耗时: {elapsed_time:.1f}秒")
@@ -808,6 +830,10 @@ if start_button:
         if successful_files > 0:
             st.balloons()
             st.success(f"📁 翻译结果保存在: {output_path}")
+            
+            # 在云端环境提供额外提示
+            if is_cloud_environment():
+                st.info("☁️ 云端环境提示: 翻译完成的文件保存在临时目录中，请及时下载。")
         else:
             st.error("❌ 没有文件成功翻译，请检查配置和日志")
 
@@ -817,6 +843,7 @@ with st.expander("📖 使用说明"):
     **页面范围格式：**
     - `1,2,3` - 翻译第1、2、3页
     - `1-5` - 翻译第1到5页  
+    - `1-` - 从第1页翻译到最后
     - `-3` - 翻译前3页
     - `1,3-5,8` - 组合使用
     
@@ -827,31 +854,33 @@ with st.expander("📖 使用说明"):
     - **OpenAI**: 官方ChatGPT服务
     - **自定义**: 手动配置其他服务商
     
+    **模型名称：**
+    - 可以使用推荐模型，也可以修改为该服务商支持的其他模型
+    - 例如SiliconFlow还支持: `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-Coder-32B-Instruct` 等
+    
     **云端部署配置：**
-    - API密钥优先从环境变量读取
-    - 也可以通过Streamlit Secrets配置
-    - 输出路径建议使用 `/tmp/` 开头的临时目录
+    - **环境变量方式**: 在部署平台设置环境变量
+    - **Streamlit Secrets**: 在`.streamlit/secrets.toml`文件中配置
+    - **输出路径**: 云端环境建议使用`/tmp/`开头的临时目录
     
-    **环境要求：**
-    - 需要预先安装 `babeldoc` 工具: `pip install babeldoc`
-    - 确保有足够的系统权限执行文件操作
-    
-    **API Key配置方式：**
-    
-    1. **环境变量方式：**
-    ```bash
-    export SILICONFLOW_API_KEY=your_key_here
-    export MODELSCOPE_API_KEY=your_key_here  
-    export OPENROUTER_API_KEY=your_key_here
-    export OPENAI_API_KEY=your_key_here
+    **API Key配置 (.env文件)：**
+    ```
+    SILICONFLOW_API_KEY=your_key_here
+    MODELSCOPE_API_KEY=your_key_here  
+    OPENROUTER_API_KEY=your_key_here
+    OPENAI_API_KEY=your_key_here
     ```
     
-    2. **Streamlit Secrets方式：**
-    在 `.streamlit/secrets.toml` 文件中配置：
+    **Streamlit Secrets配置 (.streamlit/secrets.toml)：**
     ```toml
     SILICONFLOW_API_KEY = "your_key_here"
     MODELSCOPE_API_KEY = "your_key_here"
     OPENROUTER_API_KEY = "your_key_here"
     OPENAI_API_KEY = "your_key_here"
     ```
+    
+    **部署要求：**
+    - 确保目标环境已安装`babeldoc`工具
+    - 在`requirements.txt`中添加必要依赖
+    - 配置适当的环境变量或Secrets
     """)
