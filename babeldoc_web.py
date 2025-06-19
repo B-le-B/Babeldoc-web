@@ -11,7 +11,7 @@ import threading
 import queue
 
 # 加载.env文件
-load_dotenv()
+#load_dotenv()
 
 # 自定义CSS样式
 st.markdown("""
