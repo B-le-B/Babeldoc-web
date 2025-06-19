@@ -4,14 +4,15 @@ import tempfile
 import os
 from pathlib import Path
 import time
-#import tkinter as tk
-#from tkinter import filedialog
-#from dotenv import load_dotenv
+from dotenv import load_dotenv
 import threading
 import queue
 
 # 加载.env文件
-#load_dotenv()
+try:
+    load_dotenv()
+except:
+    pass
 
 # 自定义CSS样式
 st.markdown("""
@@ -126,6 +127,16 @@ div[data-testid="stFileUploader"] section > div {
 .folder-button-align {
     margin-top: 1.65rem;
 }
+
+/* 警告信息样式 */
+.deployment-warning {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    padding: 12px;
+    border-radius: 5px;
+    margin-bottom: 1rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -170,77 +181,92 @@ def get_api_key_for_provider(provider_name):
     if api_key:
         return api_key
     
-    # 从用户配置目录读取
-    config_paths = [
-        Path.home() / '.config' / 'babeldoc' / f'{env_var.lower()}.txt',
-        Path.home() / f'.{env_var.lower()}',
-        Path('.') / f'.{env_var.lower()}'
-    ]
-    
-    for config_path in config_paths:
-        if config_path.exists():
-            try:
-                return config_path.read_text().strip()
-            except:
-                pass
+    # 从用户配置目录读取（仅在本地环境中尝试）
+    try:
+        config_paths = [
+            Path.home() / '.config' / 'babeldoc' / f'{env_var.lower()}.txt',
+            Path.home() / f'.{env_var.lower()}',
+            Path('.') / f'.{env_var.lower()}'
+        ]
+        
+        for config_path in config_paths:
+            if config_path.exists():
+                try:
+                    return config_path.read_text().strip()
+                except:
+                    pass
+    except:
+        pass
     
     return ""
 
-def select_folder():
-    """选择文件夹"""
-    root = tk.Tk()
-    root.withdraw()  # 隐藏主窗口
-    root.wm_attributes('-topmost', 1)  # 置顶
-    folder = filedialog.askdirectory()
-    root.destroy()
-    return folder
+def check_babeldoc_availability():
+    """检查babeldoc命令是否可用"""
+    try:
+        result = subprocess.run(['babeldoc', '--version'], 
+                              capture_output=True, text=True, timeout=5)
+        return result.returncode == 0
+    except:
+        return False
 
 def run_translation_with_queue(cmd, output_queue):
     """运行翻译命令，通过队列传递输出"""
-    process = subprocess.Popen(
-        cmd, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.PIPE, 
-        text=True,
-        universal_newlines=True,
-        bufsize=1  # 行缓冲
-    )
-    
-    stdout_lines = []
-    stderr_lines = []
-    
-    # 创建线程读取输出
-    def read_stream(stream, lines_list, is_stderr=False):
-        for line in iter(stream.readline, ''):
-            if line:
-                line = line.rstrip()
-                lines_list.append(line)
-                # 将输出放入队列
-                output_queue.put(('output', line, is_stderr))
-    
-    stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines, False))
-    stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines, True))
-    
-    stdout_thread.start()
-    stderr_thread.start()
-    
-    # 等待进程结束
-    returncode = process.wait()
-    
-    stdout_thread.join()
-    stderr_thread.join()
-    
-    # 发送完成信号
-    output_queue.put(('done', returncode, None))
-    
-    return returncode, '\n'.join(stdout_lines), '\n'.join(stderr_lines)
+    try:
+        process = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            text=True,
+            universal_newlines=True,
+            bufsize=1  # 行缓冲
+        )
+        
+        stdout_lines = []
+        stderr_lines = []
+        
+        # 创建线程读取输出
+        def read_stream(stream, lines_list, is_stderr=False):
+            try:
+                for line in iter(stream.readline, ''):
+                    if line:
+                        line = line.rstrip()
+                        lines_list.append(line)
+                        # 将输出放入队列
+                        output_queue.put(('output', line, is_stderr))
+            except:
+                pass
+        
+        stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines, False))
+        stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines, True))
+        
+        stdout_thread.start()
+        stderr_thread.start()
+        
+        # 等待进程结束
+        returncode = process.wait()
+        
+        stdout_thread.join()
+        stderr_thread.join()
+        
+        # 发送完成信号
+        output_queue.put(('done', returncode, None))
+        
+        return returncode, '\n'.join(stdout_lines), '\n'.join(stderr_lines)
+        
+    except Exception as e:
+        output_queue.put(('error', str(e), None))
+        return -1, "", str(e)
 
 def get_file_stem(filename):
     """从文件名获取不带扩展名的部分"""
     return Path(filename).stem
 
-# st.title("📚 PDF翻译")
+# 检查运行环境
+is_cloud_deployment = os.environ.get('STREAMLIT_SHARING_MODE') or \
+                     os.environ.get('STREAMLIT_SERVER_PORT') or \
+                     'streamlit.io' in os.environ.get('STREAMLIT_SERVER_ADDRESS', '')
 
+# 显示应用标题
 st.markdown(
     """
     <h1 style='text-align: center;'>📚 PDF翻译</h1>
@@ -248,7 +274,23 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# 显示部署环境警告
+if is_cloud_deployment:
+    st.markdown("""
+    <div class="deployment-warning">
+        <strong>⚠️ 云端部署提醒:</strong><br>
+        此应用在云端环境中运行，需要确保以下条件：<br>
+        1. 云端服务器已安装 <code>babeldoc</code> 命令<br>
+        2. 具有足够的系统权限执行文件操作<br>
+        3. API密钥通过环境变量或Streamlit Secrets配置
+    </div>
+    """, unsafe_allow_html=True)
 
+# 检查babeldoc可用性
+babeldoc_available = check_babeldoc_availability()
+if not babeldoc_available:
+    st.error("❌ 未找到babeldoc命令，请确保已正确安装babeldoc工具")
+    st.info("💡 安装方法: `pip install babeldoc`")
 
 # 文件上传
 uploaded_files = st.file_uploader(
@@ -258,7 +300,7 @@ uploaded_files = st.file_uploader(
 )
 
 # 开始翻译按钮
-start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files)
+start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files or not babeldoc_available)
 
 # 进度条占位符
 progress_placeholder = st.empty()
@@ -368,6 +410,15 @@ with st.expander("🤖 大模型设置"):
             
         with col8:
             auto_key = get_api_key_for_provider(selected_provider)
+            
+            # 尝试从Streamlit secrets获取API密钥
+            try:
+                secrets_key = st.secrets.get(provider_config["api_key_env"], "")
+                if secrets_key and not auto_key:
+                    auto_key = secrets_key
+            except:
+                pass
+                
             openai_key = st.text_input("API Key", 
                 value=auto_key,
                 type="password",
@@ -385,7 +436,7 @@ with st.expander("🤖 大模型设置"):
             else:
                 st.info(f"📌 当前使用: **{selected_provider}** | 模型: `{openai_model}` (自定义)")
 
-# 基本设置 - 修复按钮布局
+# 基本设置 - 修改输出路径处理
 with st.expander("⚙️ 基本设置", expanded=True):
     col1, col2 = st.columns([1, 1])
     
@@ -393,29 +444,26 @@ with st.expander("⚙️ 基本设置", expanded=True):
         pages = st.text_input("页面范围", "", placeholder="例: 1-5,8,10-")
         
     with col2:
-        # 使用容器和内部列来更好地控制布局
-        container = st.container()
-        with container:
-            col_path, col_btn = st.columns([10, 1])
-            
-            with col_path:
-                if 'output_path' not in st.session_state:
-                    st.session_state.output_path = r"D:\Users\Barry\Desktop\translate"
-                
-                output_path = st.text_input(
-                    "输出路径", 
-                    value=st.session_state.output_path,
-                    key="output_path_input"
-                )
-            
-            with col_btn:
-                # 使用HTML在按钮前添加空白空间来对齐
-                st.markdown('<div class="folder-button-align"></div>', unsafe_allow_html=True)
-                if st.button("📁", help="选择文件夹", key="select_folder", use_container_width=True):
-                    selected_path = select_folder()
-                    if selected_path:
-                        st.session_state.output_path = selected_path
-                        st.rerun()
+        # 简化输出路径处理，移除文件夹选择按钮（云端不可用）
+        if 'output_path' not in st.session_state:
+            # 设置默认输出路径
+            if is_cloud_deployment:
+                st.session_state.output_path = "/tmp/translate_output"
+            else:
+                st.session_state.output_path = "./translate_output"
+        
+        output_path = st.text_input(
+            "输出路径", 
+            value=st.session_state.output_path,
+            help="云端部署时建议使用 /tmp/ 开头的路径",
+            key="output_path_input"
+        )
+        
+        # 如果不是云端部署，提供重置为默认路径的按钮
+        if not is_cloud_deployment:
+            if st.button("📁 重置为默认路径", help="重置为当前目录下的translate_output"):
+                st.session_state.output_path = "./translate_output"
+                st.rerun()
 
 # 输出选项
 with st.expander("📄 输出选项"):
@@ -545,8 +593,12 @@ if start_button:
                 file_path = temp_path / uploaded_file.name
                 
                 # 保存文件
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
+                try:
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                except Exception as e:
+                    update_log(f"❌ 保存文件失败: {e}")
+                    continue
                 
                 current_progress_text.markdown(f'<div class="progress-text">当前文件: 10%</div>', unsafe_allow_html=True)
                 current_progress.progress(0.1)
@@ -660,6 +712,13 @@ if start_button:
                             returncode = msg[1]
                             break
                             
+                        elif msg[0] == 'error':
+                            # 发生错误
+                            error_msg = msg[1]
+                            update_log(f"❌ 翻译过程出错: {error_msg}")
+                            returncode = -1
+                            break
+                            
                     except queue.Empty:
                         # 队列为空，更新进度
                         if current_step < len(progress_steps):
@@ -691,20 +750,23 @@ if start_button:
                 output_files = []
                 
                 # 搜索输出文件
-                search_patterns = [
-                    "*_translated*.pdf",
-                    f"*{file_stem}*.pdf",
-                    f"{file_stem}_*.pdf",
-                    "*dual*.pdf",
-                    "*mono*.pdf"
-                ]
-                
-                for pattern in search_patterns:
-                    found_files = list(Path(output_path).glob(pattern))
-                    output_files.extend(found_files)
-                
-                # 去重
-                output_files = list(set(output_files))
+                try:
+                    search_patterns = [
+                        "*_translated*.pdf",
+                        f"*{file_stem}*.pdf",
+                        f"{file_stem}_*.pdf",
+                        "*dual*.pdf",
+                        "*mono*.pdf"
+                    ]
+                    
+                    for pattern in search_patterns:
+                        found_files = list(Path(output_path).glob(pattern))
+                        output_files.extend(found_files)
+                    
+                    # 去重
+                    output_files = list(set(output_files))
+                except Exception as e:
+                    update_log(f"⚠️ 搜索输出文件时出错: {e}")
                 
                 if returncode == 0:
                     if output_files:
@@ -755,7 +817,6 @@ with st.expander("📖 使用说明"):
     **页面范围格式：**
     - `1,2,3` - 翻译第1、2、3页
     - `1-5` - 翻译第1到5页  
-    - `1-` - 从第1页翻译到最后
     - `-3` - 翻译前3页
     - `1,3-5,8` - 组合使用
     
@@ -766,18 +827,31 @@ with st.expander("📖 使用说明"):
     - **OpenAI**: 官方ChatGPT服务
     - **自定义**: 手动配置其他服务商
     
-    **模型名称：**
-    - 可以使用推荐模型，也可以修改为该服务商支持的其他模型
-    - 例如SiliconFlow还支持: `deepseek-ai/DeepSeek-V3`, `Qwen/Qwen2.5-Coder-32B-Instruct` 等
+    **云端部署配置：**
+    - API密钥优先从环境变量读取
+    - 也可以通过Streamlit Secrets配置
+    - 输出路径建议使用 `/tmp/` 开头的临时目录
     
-    **日志说明：**
-    - **实时日志**: 显示翻译进度和关键步骤信息
+    **环境要求：**
+    - 需要预先安装 `babeldoc` 工具: `pip install babeldoc`
+    - 确保有足够的系统权限执行文件操作
     
-    **API Key配置 (.env文件)：**
+    **API Key配置方式：**
+    
+    1. **环境变量方式：**
+    ```bash
+    export SILICONFLOW_API_KEY=your_key_here
+    export MODELSCOPE_API_KEY=your_key_here  
+    export OPENROUTER_API_KEY=your_key_here
+    export OPENAI_API_KEY=your_key_here
     ```
-    SILICONFLOW_API_KEY=your_key_here
-    MODELSCOPE_API_KEY=your_key_here  
-    OPENROUTER_API_KEY=your_key_here
-    OPENAI_API_KEY=your_key_here
+    
+    2. **Streamlit Secrets方式：**
+    在 `.streamlit/secrets.toml` 文件中配置：
+    ```toml
+    SILICONFLOW_API_KEY = "your_key_here"
+    MODELSCOPE_API_KEY = "your_key_here"
+    OPENROUTER_API_KEY = "your_key_here"
+    OPENAI_API_KEY = "your_key_here"
     ```
     """)
