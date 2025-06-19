@@ -4,7 +4,6 @@ import tempfile
 import os
 from pathlib import Path
 import time
-from dotenv import load_dotenv
 import threading
 import queue
 import zipfile
