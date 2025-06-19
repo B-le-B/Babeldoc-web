@@ -72,7 +72,7 @@ div[data-testid="stFileUploader"] section > div {
     background-color: #e8f5e8;
     padding: 10px;
     border-radius: 5px;
-    margin-top: 10px;
+    margin-top: 15px;
 }
 
 /* 文件列表样式 */
@@ -254,6 +254,16 @@ def create_download_zip(files):
                 zip_file.write(file_path, file_path.name)
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
+
+def calculate_unified_progress(completed_files, total_files, current_file_progress):
+    """计算统一进度"""
+    if total_files == 0:
+        return 0
+    
+    base_progress = completed_files / total_files
+    current_contribution = (current_file_progress / 100) / total_files
+    
+    return min((base_progress + current_contribution) * 100, 100)
 
 def display_download_section(results):
     """显示下载区域"""
@@ -505,17 +515,11 @@ if start_button:
     st.session_state.translation_results = []  # 清空之前的结果
     
     with progress_placeholder.container():
-        # 翻译进度
+        # 统一进度显示
         with st.expander("📊 翻译进度", expanded=True):
-            overall_progress_text = st.empty()
-            overall_progress = st.progress(0)
-            overall_status = st.empty()
-            
-            st.markdown("---")
-            
-            current_progress_text = st.empty()
-            current_progress = st.progress(0)
-            current_status = st.empty()
+            progress_text = st.empty()
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
             # 下载区域占位符
             download_placeholder = st.empty()
@@ -537,17 +541,15 @@ if start_button:
         
         for i, uploaded_file in enumerate(uploaded_files):
             file_num = i + 1
-            overall_percent = int((i / total_files) * 100)
-            overall_progress_text.markdown(f'<div class="progress-text">整体进度: {overall_percent}% ({file_num}/{total_files})</div>', unsafe_allow_html=True)
-            overall_progress.progress(i / total_files)
-            overall_status.text(f"正在处理: {uploaded_file.name}")
-            
-            current_progress_text.markdown(f'<div class="progress-text">当前文件: 0%</div>', unsafe_allow_html=True)
-            current_progress.progress(0)
-            current_status.text("准备中...")
             
             update_log(f"═══════════════════════════════════════")
             update_log(f"🔄 开始处理文件 {file_num}/{total_files}: {uploaded_file.name}")
+            
+            # 初始化当前文件状态
+            if total_files == 1:
+                status_text.text(f"准备翻译: {uploaded_file.name}")
+            else:
+                status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 准备中...")
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
@@ -561,9 +563,16 @@ if start_button:
                     update_log(f"❌ 保存文件失败: {e}")
                     continue
                 
-                current_progress_text.markdown(f'<div class="progress-text">当前文件: 10%</div>', unsafe_allow_html=True)
-                current_progress.progress(0.1)
-                current_status.text("构建翻译命令...")
+                # 更新进度：文件保存完成
+                current_file_progress = 10
+                unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
+                progress_bar.progress(unified_progress / 100)
+                
+                if total_files == 1:
+                    status_text.text(f"构建翻译命令... ({current_file_progress}%)")
+                else:
+                    status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 构建翻译命令... ({current_file_progress}%)")
                 
                 # 构建命令
                 cmd = [
@@ -602,9 +611,16 @@ if start_button:
                 update_log(f"📝 翻译配置: {lang_in} → {lang_out}")
                 update_log(f"🤖 使用模型: {openai_model if use_openai else '本地模型'}")
                 
-                current_progress_text.markdown(f'<div class="progress-text">当前文件: 15%</div>', unsafe_allow_html=True)
-                current_progress.progress(0.15)
-                current_status.text("执行翻译中...")
+                # 更新进度：开始翻译
+                current_file_progress = 15
+                unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
+                progress_bar.progress(unified_progress / 100)
+                
+                if total_files == 1:
+                    status_text.text(f"正在执行翻译... ({current_file_progress}%)")
+                else:
+                    status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 正在执行翻译... ({current_file_progress}%)")
                 
                 start_time = time.time()
                 output_queue = queue.Queue()
@@ -614,7 +630,6 @@ if start_button:
                 translate_thread.start()
                 
                 # 实时进度监控
-                current_file_progress = 15
                 returncode = None
                 stderr = ""
                 last_progress_time = time.time()
@@ -644,18 +659,24 @@ if start_button:
                                     # 确保进度只增不减
                                     if detected_progress > current_file_progress:
                                         current_file_progress = min(detected_progress, 95)
-                                        current_progress_text.markdown(f'<div class="progress-text">当前文件: {current_file_progress}%</div>', unsafe_allow_html=True)
-                                        current_progress.progress(current_file_progress / 100)
+                                        unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                                        progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
+                                        progress_bar.progress(unified_progress / 100)
                                         
                                         # 更新状态文本
                                         if current_file_progress < 30:
-                                            current_status.text("📖 正在解析PDF文档...")
+                                            stage = "📖 正在解析PDF文档..."
                                         elif current_file_progress < 70:
-                                            current_status.text("🔤 正在翻译文本内容...")
+                                            stage = "🔤 正在翻译文本内容..."
                                         elif current_file_progress < 90:
-                                            current_status.text("📝 正在生成翻译文档...")
+                                            stage = "📝 正在生成翻译文档..."
                                         else:
-                                            current_status.text("💾 正在保存文件...")
+                                            stage = "💾 正在保存文件..."
+                                        
+                                        if total_files == 1:
+                                            status_text.text(f"{stage} ({current_file_progress}%)")
+                                        else:
+                                            status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - {stage} ({current_file_progress}%)")
                         
                         elif msg_type == 'done':
                             returncode = msg[1]
@@ -672,7 +693,8 @@ if start_button:
                         current_time = time.time()
                         if current_time - last_progress_time > 2 and current_file_progress < 85:
                             current_file_progress += 1
-                            current_progress.progress(current_file_progress / 100)
+                            unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                            progress_bar.progress(unified_progress / 100)
                             last_progress_time = current_time
                         
                         # 检查超时（5分钟）
@@ -686,17 +708,31 @@ if start_button:
                 update_log(f"⏱️ 翻译耗时: {elapsed_time:.1f}秒")
                 
                 # 查找输出文件
-                current_progress_text.markdown(f'<div class="progress-text">当前文件: 90%</div>', unsafe_allow_html=True)
-                current_progress.progress(0.9)
-                current_status.text("🔍 正在检查输出文件...")
-                update_log("🔍 正在查找输出文件...")
+                current_file_progress = 90
+                unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
+                progress_bar.progress(unified_progress / 100)
                 
+                if total_files == 1:
+                    status_text.text(f"🔍 正在检查输出文件... ({current_file_progress}%)")
+                else:
+                    status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - 🔍 正在检查输出文件... ({current_file_progress}%)")
+                
+                update_log("🔍 正在查找输出文件...")
                 output_files = find_output_files(output_path, uploaded_file.name)
                 
                 if returncode == 0 and output_files:
-                    current_progress_text.markdown(f'<div class="progress-text">当前文件: 100% ✅</div>', unsafe_allow_html=True)
-                    current_progress.progress(1.0)
-                    current_status.text("✅ 翻译完成")
+                    # 完成当前文件
+                    current_file_progress = 100
+                    unified_progress = calculate_unified_progress(i, total_files, current_file_progress)
+                    progress_text.markdown(f'<div class="progress-text">进度: {unified_progress:.0f}%</div>', unsafe_allow_html=True)
+                    progress_bar.progress(unified_progress / 100)
+                    
+                    if total_files == 1:
+                        status_text.text("✅ 翻译完成")
+                    else:
+                        status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - ✅ 翻译完成")
+                    
                     successful_files += 1
                     
                     # 保存结果到session state
@@ -713,7 +749,11 @@ if start_button:
                     update_log(f"📁 输出文件: {[f.name for f in output_files]}")
                     update_log(f"📍 保存位置: {output_path}")
                 else:
-                    current_status.text("❌ 翻译失败")
+                    if total_files == 1:
+                        status_text.text("❌ 翻译失败")
+                    else:
+                        status_text.text(f"文件 {file_num}/{total_files}: {uploaded_file.name} - ❌ 翻译失败")
+                    
                     update_log(f"❌ 翻译失败! 返回码: {returncode}")
                     
                     if stderr:
@@ -724,12 +764,9 @@ if start_button:
         
         # 完成所有文件处理
         update_log(f"═══════════════════════════════════════")
-        final_percent = 100
-        overall_progress_text.markdown(f'<div class="progress-text">整体进度: {final_percent}% ✅ 处理完成!</div>', unsafe_allow_html=True)
-        overall_progress.progress(1.0)
-        overall_status.text(f"🎉 处理完成! 成功: {successful_files}/{total_files}")
-        current_progress_text.markdown("")
-        current_status.text("")
+        progress_text.markdown(f'<div class="progress-text">进度: 100% ✅ 处理完成!</div>', unsafe_allow_html=True)
+        progress_bar.progress(1.0)
+        status_text.text(f"🎉 处理完成! 成功: {successful_files}/{total_files}")
         
         update_log(f"🎉 所有文件处理完成!")
         update_log(f"📊 成功率: {successful_files}/{total_files} ({int(successful_files/total_files*100) if total_files > 0 else 0}%)")
@@ -771,7 +808,8 @@ with st.expander("📖 使用说明"):
     - 文件会自动保存到指定目录并提供下载
     
     **进度显示：**
+    - 统一进度条显示总体翻译进度
+    - 单文件时显示该文件的翻译进度
+    - 多文件时显示整体完成度
     - 实时监控babeldoc输出，显示真实翻译进度
-    - 根据关键词智能判断当前翻译阶段
-    - 避免进度条长时间停滞
     """)
