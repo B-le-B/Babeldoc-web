@@ -8,6 +8,7 @@ import threading
 import queue
 import zipfile
 import io
+import re
 
 # 加载.env文件
 try:
@@ -66,13 +67,21 @@ div[data-testid="stFileUploader"] section > div {
     outline: none !important;
 }
 
-/* 下载区域样式 */
-.download-section {
+/* 下载按钮样式 */
+.download-buttons {
     background-color: #e8f5e8;
-    padding: 15px;
-    border-radius: 8px;
-    border-left: 4px solid #28a745;
-    margin: 10px 0;
+    padding: 10px;
+    border-radius: 5px;
+    margin-top: 10px;
+}
+
+/* 文件列表样式 */
+.file-item {
+    background-color: #f8f9fa;
+    padding: 8px;
+    border-radius: 4px;
+    margin: 4px 0;
+    border-left: 3px solid #28a745;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -130,6 +139,32 @@ def get_api_key_for_provider(provider_name):
     
     return ""
 
+def analyze_progress_from_output(line):
+    """根据输出内容分析当前进度"""
+    line_lower = line.lower()
+    
+    # 进度关键词映射
+    progress_patterns = [
+        (r'saving|saved|writing', 95),
+        (r'generating|creating.*pdf', 85),
+        (r'translating.*page|translation.*complete', 70),
+        (r'translate.*text|processing.*translation', 50),
+        (r'extracting.*text|parsing.*pdf|reading.*pdf', 25),
+        (r'loading|initializing|starting', 15),
+        (r'error|failed|exception', -1)  # 错误情况
+    ]
+    
+    for pattern, progress in progress_patterns:
+        if re.search(pattern, line_lower):
+            return progress
+    
+    # 如果包含百分比数字，尝试提取
+    percent_match = re.search(r'(\d+)%', line)
+    if percent_match:
+        return int(percent_match.group(1))
+    
+    return None
+
 def run_translation_with_queue(cmd, output_queue):
     """运行翻译命令，通过队列传递输出"""
     try:
@@ -151,9 +186,11 @@ def run_translation_with_queue(cmd, output_queue):
                     if line:
                         line = line.rstrip()
                         lines_list.append(line)
-                        output_queue.put(('output', line, is_stderr))
-            except:
-                pass
+                        # 分析进度
+                        progress = analyze_progress_from_output(line)
+                        output_queue.put(('output', line, is_stderr, progress))
+            except Exception as e:
+                output_queue.put(('error', f"读取输出流错误: {str(e)}", False, None))
         
         stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines, False))
         stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines, True))
@@ -166,12 +203,12 @@ def run_translation_with_queue(cmd, output_queue):
         stdout_thread.join()
         stderr_thread.join()
         
-        output_queue.put(('done', returncode, None))
+        output_queue.put(('done', returncode, None, None))
         
         return returncode, '\n'.join(stdout_lines), '\n'.join(stderr_lines)
         
     except Exception as e:
-        output_queue.put(('error', f"执行命令错误: {str(e)}", None))
+        output_queue.put(('error', f"执行命令错误: {str(e)}", None, None))
         return -1, "", str(e)
 
 def get_file_stem(filename):
@@ -217,6 +254,55 @@ def create_download_zip(files):
                 zip_file.write(file_path, file_path.name)
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
+
+def display_download_section(results):
+    """显示下载区域"""
+    if not results:
+        return
+    
+    st.markdown('<div class="download-buttons">', unsafe_allow_html=True)
+    st.markdown("📥 **下载翻译结果:**")
+    
+    # 单个文件下载
+    for i, result in enumerate(results):
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            file_size_mb = result['size'] / (1024 * 1024)
+            st.markdown(f'<div class="file-item">📄 {result["translated_name"]} ({file_size_mb:.1f} MB)</div>', 
+                       unsafe_allow_html=True)
+        
+        with col2:
+            try:
+                with open(result['file_path'], 'rb') as f:
+                    file_data = f.read()
+                st.download_button(
+                    label="下载",
+                    data=file_data,
+                    file_name=result['translated_name'],
+                    mime="application/pdf",
+                    key=f"download_{result['translated_name']}_{i}"
+                )
+            except Exception as e:
+                st.error(f"读取文件失败: {e}")
+    
+    # 批量下载
+    if len(results) > 1:
+        try:
+            file_paths = [r['file_path'] for r in results]
+            zip_data = create_download_zip(file_paths)
+            
+            st.download_button(
+                label="📦 下载所有文件 (ZIP)",
+                data=zip_data,
+                file_name=f"translated_pdfs_{int(time.time())}.zip",
+                mime="application/zip",
+                key="download_all_zip"
+            )
+        except Exception as e:
+            st.error(f"创建ZIP文件失败: {e}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # 显示应用标题
 st.markdown(
@@ -430,9 +516,12 @@ if start_button:
             current_progress_text = st.empty()
             current_progress = st.progress(0)
             current_status = st.empty()
+            
+            # 下载区域占位符
+            download_placeholder = st.empty()
         
         # 实时日志
-        with st.expander("📝 实时日志", expanded=True):
+        with st.expander("📝 实时日志", expanded=False):
             log_container_main = st.empty()
         
         all_logs = []
@@ -457,7 +546,8 @@ if start_button:
             current_progress.progress(0)
             current_status.text("准备中...")
             
-            update_log(f"🔄 开始处理: {uploaded_file.name}")
+            update_log(f"═══════════════════════════════════════")
+            update_log(f"🔄 开始处理文件 {file_num}/{total_files}: {uploaded_file.name}")
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
@@ -466,11 +556,12 @@ if start_button:
                 try:
                     with open(file_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
-                    update_log("✅ 文件已保存")
+                    update_log("✅ 文件已保存到临时目录")
                 except Exception as e:
                     update_log(f"❌ 保存文件失败: {e}")
                     continue
                 
+                current_progress_text.markdown(f'<div class="progress-text">当前文件: 10%</div>', unsafe_allow_html=True)
                 current_progress.progress(0.1)
                 current_status.text("构建翻译命令...")
                 
@@ -507,8 +598,12 @@ if start_button:
                     ])
                     if custom_prompt: cmd.extend(["--custom-system-prompt", custom_prompt])
                 
-                update_log("🚀 开始翻译...")
-                current_progress.progress(0.2)
+                update_log("🚀 开始执行翻译命令...")
+                update_log(f"📝 翻译配置: {lang_in} → {lang_out}")
+                update_log(f"🤖 使用模型: {openai_model if use_openai else '本地模型'}")
+                
+                current_progress_text.markdown(f'<div class="progress-text">当前文件: 15%</div>', unsafe_allow_html=True)
+                current_progress.progress(0.15)
                 current_status.text("执行翻译中...")
                 
                 start_time = time.time()
@@ -518,39 +613,88 @@ if start_button:
                     target=run_translation_with_queue, args=(cmd, output_queue))
                 translate_thread.start()
                 
-                # 进度模拟
-                progress_steps = [(0.3, "📖 解析PDF..."), (0.6, "🔤 翻译中..."), (0.8, "📝 生成文档...")]
-                current_step = 0
+                # 实时进度监控
+                current_file_progress = 15
                 returncode = None
+                stderr = ""
+                last_progress_time = time.time()
                 
                 while True:
                     try:
                         msg = output_queue.get(timeout=0.1)
-                        if msg[0] == 'done':
+                        msg_type = msg[0]
+                        
+                        if msg_type == 'output':
+                            line = msg[1]
+                            is_stderr = msg[2]
+                            detected_progress = msg[3]
+                            
+                            if is_stderr:
+                                stderr += line + "\n"
+                            
+                            # 更新日志
+                            if line.strip():
+                                update_log(f"📝 {line}")
+                            
+                            # 根据输出更新进度
+                            if detected_progress is not None:
+                                if detected_progress == -1:  # 错误
+                                    update_log(f"❌ 检测到错误: {line}")
+                                else:
+                                    # 确保进度只增不减
+                                    if detected_progress > current_file_progress:
+                                        current_file_progress = min(detected_progress, 95)
+                                        current_progress_text.markdown(f'<div class="progress-text">当前文件: {current_file_progress}%</div>', unsafe_allow_html=True)
+                                        current_progress.progress(current_file_progress / 100)
+                                        
+                                        # 更新状态文本
+                                        if current_file_progress < 30:
+                                            current_status.text("📖 正在解析PDF文档...")
+                                        elif current_file_progress < 70:
+                                            current_status.text("🔤 正在翻译文本内容...")
+                                        elif current_file_progress < 90:
+                                            current_status.text("📝 正在生成翻译文档...")
+                                        else:
+                                            current_status.text("💾 正在保存文件...")
+                        
+                        elif msg_type == 'done':
                             returncode = msg[1]
                             break
-                        elif msg[0] == 'error':
-                            update_log(f"❌ {msg[1]}")
+                            
+                        elif msg_type == 'error':
+                            error_msg = msg[1]
+                            update_log(f"❌ {error_msg}")
                             returncode = -1
                             break
+                            
                     except queue.Empty:
-                        if current_step < len(progress_steps):
-                            progress, status_text = progress_steps[current_step]
-                            current_progress.progress(progress)
-                            update_log(status_text)
-                            current_step += 1
+                        # 超时处理 - 缓慢推进进度（避免卡住的感觉）
+                        current_time = time.time()
+                        if current_time - last_progress_time > 2 and current_file_progress < 85:
+                            current_file_progress += 1
+                            current_progress.progress(current_file_progress / 100)
+                            last_progress_time = current_time
+                        
+                        # 检查超时（5分钟）
+                        if current_time - start_time > 300:
+                            update_log("⚠️ 翻译超时，强制退出")
+                            returncode = -1
+                            break
                 
                 translate_thread.join(timeout=5)
                 elapsed_time = time.time() - start_time
-                update_log(f"⏱️ 耗时: {elapsed_time:.1f}秒")
+                update_log(f"⏱️ 翻译耗时: {elapsed_time:.1f}秒")
                 
                 # 查找输出文件
+                current_progress_text.markdown(f'<div class="progress-text">当前文件: 90%</div>', unsafe_allow_html=True)
                 current_progress.progress(0.9)
-                update_log("🔍 查找输出文件...")
+                current_status.text("🔍 正在检查输出文件...")
+                update_log("🔍 正在查找输出文件...")
                 
                 output_files = find_output_files(output_path, uploaded_file.name)
                 
                 if returncode == 0 and output_files:
+                    current_progress_text.markdown(f'<div class="progress-text">当前文件: 100% ✅</div>', unsafe_allow_html=True)
                     current_progress.progress(1.0)
                     current_status.text("✅ 翻译完成")
                     successful_files += 1
@@ -565,67 +709,40 @@ if start_button:
                                 'size': file_path.stat().st_size
                             })
                     
-                    update_log(f"✅ 翻译完成! 生成了 {len(output_files)} 个文件")
+                    update_log(f"✅ 翻译成功完成!")
+                    update_log(f"📁 输出文件: {[f.name for f in output_files]}")
+                    update_log(f"📍 保存位置: {output_path}")
                 else:
                     current_status.text("❌ 翻译失败")
                     update_log(f"❌ 翻译失败! 返回码: {returncode}")
+                    
+                    if stderr:
+                        error_lines = stderr.strip().split('\n')
+                        for line in error_lines[-3:]:
+                            if line.strip():
+                                update_log(f"🚨 错误: {line.strip()}")
         
-        # 完成处理
+        # 完成所有文件处理
+        update_log(f"═══════════════════════════════════════")
+        final_percent = 100
+        overall_progress_text.markdown(f'<div class="progress-text">整体进度: {final_percent}% ✅ 处理完成!</div>', unsafe_allow_html=True)
         overall_progress.progress(1.0)
         overall_status.text(f"🎉 处理完成! 成功: {successful_files}/{total_files}")
+        current_progress_text.markdown("")
+        current_status.text("")
+        
+        update_log(f"🎉 所有文件处理完成!")
+        update_log(f"📊 成功率: {successful_files}/{total_files} ({int(successful_files/total_files*100) if total_files > 0 else 0}%)")
+        update_log(f"📁 输出目录: {output_path}")
         
         if successful_files > 0:
             st.balloons()
-            update_log(f"🎉 全部完成! 成功: {successful_files}/{total_files}")
-
-# 下载区域
-if 'translation_results' in st.session_state and st.session_state.translation_results:
-    st.markdown("---")
-    st.markdown("## 📥 下载翻译结果")
-    
-    results = st.session_state.translation_results
-    
-    # 显示文件列表
-    st.markdown("### 生成的文件:")
-    for result in results:
-        col1, col2, col3 = st.columns([3, 1, 1])
-        
-        with col1:
-            file_size_mb = result['size'] / (1024 * 1024)
-            st.write(f"📄 **{result['translated_name']}** ({file_size_mb:.1f} MB)")
-        
-        with col2:
-            try:
-                with open(result['file_path'], 'rb') as f:
-                    file_data = f.read()
-                st.download_button(
-                    label="下载",
-                    data=file_data,
-                    file_name=result['translated_name'],
-                    mime="application/pdf",
-                    key=f"download_{result['translated_name']}"
-                )
-            except Exception as e:
-                st.error(f"读取文件失败: {e}")
-        
-        with col3:
-            st.write(f"原文件: {result['original_name']}")
-    
-    # 批量下载
-    if len(results) > 1:
-        st.markdown("### 批量下载:")
-        try:
-            file_paths = [r['file_path'] for r in results]
-            zip_data = create_download_zip(file_paths)
             
-            st.download_button(
-                label="📦 下载所有文件 (ZIP)",
-                data=zip_data,
-                file_name=f"translated_pdfs_{int(time.time())}.zip",
-                mime="application/zip"
-            )
-        except Exception as e:
-            st.error(f"创建ZIP文件失败: {e}")
+            # 在进度区域内显示下载按钮
+            with download_placeholder.container():
+                display_download_section(st.session_state.translation_results)
+        else:
+            st.error("❌ 没有文件成功翻译，请检查配置和日志")
 
 # 使用说明
 with st.expander("📖 使用说明"):
@@ -649,7 +766,12 @@ with st.expander("📖 使用说明"):
     - 支持在界面中直接输入
     
     **下载说明：**
-    - 翻译完成后自动显示下载区域
+    - 翻译完成后自动在进度区域显示下载按钮
     - 支持单个文件下载和批量ZIP下载
     - 文件会自动保存到指定目录并提供下载
+    
+    **进度显示：**
+    - 实时监控babeldoc输出，显示真实翻译进度
+    - 根据关键词智能判断当前翻译阶段
+    - 避免进度条长时间停滞
     """)
