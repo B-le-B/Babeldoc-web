@@ -13,7 +13,7 @@ import uuid
 
 import streamlit.components.v1 as components  # 使用兼容性更好的 components
 
-# --- PWA 最终注入方案 (高兼容性版本) ---
+# --- PWA 最终注入方案 (高兼容性修正版) ---
 
 st.set_page_config(
     page_title="PDF 智能翻译",
@@ -60,8 +60,9 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 """
 
-# 使用 st.components.v1.html 进行注入，这个函数不会引起TypeError
-components.html(pwa_injection_script, height=0)
+# 使用 st.components.v1.html 进行注入
+# **已移除导致崩溃的 height=0 参数**
+components.html(pwa_injection_script)
 
 # --- 结束注入 ---
 
