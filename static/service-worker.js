@@ -1,9 +1,9 @@
 const CACHE_NAME = 'pdf-translator-cache-v1';
 // 需要缓存的核心文件列表
 const urlsToCache = [
-  '/offline.html',
-  '/icons/192x192.png',
-  '/icons/512x512.png'
+  '/static/offline.html',
+  '/static/icons/192x192.png',
+  '/static/icons/512x512.png'
 ];
 
 // 安装 Service Worker 时，缓存核心资源
@@ -26,7 +26,7 @@ self.addEventListener('fetch', event => {
         // 如果网络请求失败（即离线），则从缓存中查找
         // 特别是对于页面导航请求，返回离线页面
         if (event.request.mode === 'navigate') {
-          return caches.match('/offline.html');
+          return caches.match('/static/offline.html');
         }
       })
   );
