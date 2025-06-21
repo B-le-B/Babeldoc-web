@@ -1,51 +1,21 @@
-# Web框架
+# 核心依赖
 Flask>=2.3.0
 Werkzeug>=2.3.0
 gunicorn>=21.0.0
-gevent>=23.0.0
 
-# PDF处理和文档翻译 (BabelDOC依赖)
+# PDF翻译
 babeldoc @ git+https://github.com/funstory-ai/BabelDOC.git@8d77e9c19ddc8b21d4388335ebfc28a05cd3979e
-
-# AI/翻译相关
 openai>=1.80.0
-httpx>=0.28.0
-
-# 图像和PDF处理
-pillow>=10.0.0
-opencv-python-headless>=4.8.0
-pymupdf>=1.23.0
-numpy>=1.24.0
-
-# OCR相关
-rapidocr-onnxruntime>=1.4.0
-onnxruntime>=1.16.0
-
-# 文本处理
-pyyaml>=6.0
-lxml>=4.9.0
-python-levenshtein>=0.25.0
-rapidfuzz>=3.0.0
-
-# 系统工具
 requests>=2.31.0
-urllib3>=2.0.0
-certifi>=2023.0.0
-charset-normalizer>=3.0.0
-click>=8.1.0
-colorama>=0.4.6
-tqdm>=4.65.0
-psutil>=5.9.0
 
-# 数据处理
-pandas>=2.0.0
-scipy>=1.10.0
-scikit-image>=0.21.0
+# 修正版本约束
+rapidocr-onnxruntime<=1.2.3
+pymupdf<=1.24.0
+numpy<2.0.0
+pillow>=10.0.0,<12.0.0
+opencv-python-headless>=4.8.0,<5.0.0
 
-# 工具库
-packaging>=23.0
-jinja2>=3.1.0
-markupsafe>=2.1.0
-typing-extensions>=4.8.0
+# 基础库
+pyyaml>=6.0
 python-dotenv>=1.0.0
-tenacity>=8.2.0
+packaging>=23.0
