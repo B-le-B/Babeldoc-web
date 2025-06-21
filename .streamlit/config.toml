@@ -1,3 +1,0 @@
-[server]
-runOnSave = true
-static_folder = "static"
