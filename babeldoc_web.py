@@ -4,7 +4,7 @@ import streamlit.components.v1 as components
 # --- 1. 页面配置 (必须是第一个st命令) ---
 st.set_page_config(
     page_title="PDF 智能翻译",
-    page_icon="/static/icons/192x192.png"  # 尝试在这里使用URL路径，这是官方支持的方式
+    page_icon="/static/icons/icon-192.png"  # 尝试在这里使用URL路径，这是官方支持的方式
 )
 
 # --- 2. PWA 注入 (使用最可靠的方式) ---
@@ -56,7 +56,7 @@ st.info("如果PWA配置成功，你应该可以在浏览器地址栏看到安�
 st.markdown(
     f"""
     <h3>PWA 图标预览</h3>
-    <img src="/static/icons/192x192.png" width="100">
+    <img src="/static/icons/icon-192.png" width="100">
     """,
     unsafe_allow_html=True
 )
