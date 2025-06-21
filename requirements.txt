@@ -125,3 +125,8 @@ xsdata==25.4
 streamlit
 matplotlib-base
 opencv-python-headless
+
+Flask
+Werkzeug
+gunicorn
+gevent
