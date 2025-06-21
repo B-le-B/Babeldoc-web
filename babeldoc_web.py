@@ -21,65 +21,59 @@ st.set_page_config(
     page_icon="📚"
 )
 
-# --- 2. Base64 编码模块 ---
-# 辅助函数：读取文件并编码为Base64 Data URL
-def get_file_as_base64_data_url(path, mime_type):
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-        encoded_data = base64.b64encode(data).decode()
-        return f"data:{mime_type};base64,{encoded_data}"
-    except Exception as e:
-        st.error(f"Error encoding file {path}: {e}")
-        return ""
-
-# --- 3. 构建完全自包含的 PWA 资源 ---
+# --- 2. 构建极简PWA资源 (无文件读取) ---
 try:
-    # 定义文件路径
-    static_dir = "static"
-    icons_dir = os.path.join(static_dir, "icons")
-    icon_192_path = os.path.join(icons_dir, "192x192.png")
-    icon_512_path = os.path.join(icons_dir, "512x512.png")
-    manifest_path = os.path.join(static_dir, "manifest.json")
-    sw_path = os.path.join(static_dir, "service-worker.js")
-    offline_path = os.path.join(static_dir, "offline.html")
+    # 1. 直接在代码中定义Manifest (无图标)
+    manifest = {
+      "name": "PDF 智能翻译",
+      "short_name": "PDF翻译",
+      "description": "一个使用大模型进行PDF文档翻译的工具",
+      "start_url": ".",
+      "display": "standalone",
+      "background_color": "#ffffff",
+      "theme_color": "#0068C9",
+      "icons": [] # 留空图标数组
+    }
+    manifest_json_string = json.dumps(manifest)
+    manifest_b64 = base64.b64encode(manifest_json_string.encode('utf-8')).decode()
+    manifest_data_url = f"data:application/json;base64,{manifest_b64}"
 
-    # 1. 创建 Manifest 的 Data URL
-    # 读取manifest模板，并用图标的Data URL填充它
-    with open(manifest_path, 'r', encoding='utf-8') as f:
-        manifest_template = json.load(f)
-    
-    manifest_template['icons'][0]['src'] = get_file_as_base64_data_url(icon_192_path, "image/png")
-    manifest_template['icons'][1]['src'] = get_file_as_base64_data_url(icon_512_path, "image/png")
-    
-    manifest_json_string = json.dumps(manifest_template)
-    manifest_data_url = get_file_as_base64_data_url(manifest_json_string.encode('utf-8'), "application/json")
+    # 2. 直接在代码中定义Service Worker
+    offline_html_content = """
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head><meta charset="UTF-8"><title>离线</title><style>body{font-family:sans-serif;margin:0;display:flex;justify-content:center;align-items:center;height:100vh;text-align:center;}</style></head>
+    <body><div>🔌<h1>网络连接已断开</h1><p>请连接网络后重试。</p></div></body>
+    </html>
+    """
+    offline_html_b64 = base64.b64encode(offline_html_content.encode('utf-8')).decode()
+    offline_data_url = f"data:text/html;base64,{offline_html_b64}"
 
-    # 2. 创建 Service Worker 的 Data URL
-    # 读取service worker模板，并用离线页面的Data URL填充它
-    with open(sw_path, 'r', encoding='utf-8') as f:
-        sw_template = f.read()
-    
-    offline_page_data_url = get_file_as_base64_data_url(offline_path, "text/html")
-    sw_script = sw_template.replace("'/static/offline.html'", f"'{offline_page_data_url}'")
-    
-    sw_data_url = get_file_as_base64_data_url(sw_script.encode('utf-8'), "application/javascript")
+    sw_script = f"""
+    self.addEventListener('fetch', function(event) {{
+        event.respondWith(
+            fetch(event.request).catch(function() {{
+                return new Response(atob('{offline_html_b64}'), {{headers: {{ 'Content-Type': 'text/html' }}}});
+            }})
+        );
+    }});
+    """
+    sw_b64 = base64.b64encode(sw_script.encode('utf-8')).decode()
+    sw_data_url = f"data:application/javascript;base64,{sw_b64}"
 
-    # 3. 构建最终注入的HTML
+    # 3. 构建并注入最终的HTML
     pwa_injection_html = f"""
         <link rel="manifest" href="{manifest_data_url}">
         <script>
             if ('serviceWorker' in navigator) {{
-                window.addEventListener('load', () => {{
-                    navigator.serviceWorker.register("{sw_data_url}")
-                        .then(reg => console.log('PWA: Self-contained Service worker registered.', reg.scope))
-                        .catch(err => console.error('PWA: Service worker registration failed.', err));
-                }});
+                navigator.serviceWorker.register("{sw_data_url}")
+                    .then(reg => console.log('PWA: Minimal service worker registered.', reg.scope))
+                    .catch(err => console.error('PWA: Service worker registration failed.', err));
             }}
         </script>
     """
     components.html(pwa_injection_html, height=0)
-    st.success("PWA components embedded successfully!")
+    st.success("PWA (minimal) components embedded.")
 
 except Exception as e:
     st.error(f"Failed to build PWA components: {e}")
