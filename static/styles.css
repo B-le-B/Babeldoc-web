@@ -1,0 +1,699 @@
+/* static/styles.css - 修复版本 */
+
+/* 基础样式 */
+body { 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+    line-height: 1.6; 
+    color: #333; 
+    max-width: 800px; 
+    margin: 1.5rem auto; 
+    padding: 0 1rem; 
+    background-color: #fdfdfd; 
+}
+
+/* 头部区域 */
+.header { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    padding-bottom: 1rem; 
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid #eee;
+}
+
+h1 { 
+    color: #222; 
+    margin: 0; 
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+/* 修复语言切换样式 - 居中对齐 */
+.lang-switcher { 
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.8rem;
+}
+
+.lang-switcher span {
+    color: #ccc;
+    font-weight: 300;
+}
+
+.lang-switcher a { 
+    text-decoration: none; 
+    color: #007bff; 
+    font-weight: 500;
+    padding: 0.4rem 0.8rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.lang-switcher a:hover {
+    background-color: #f1f3f4;
+}
+
+.lang-switcher .active { 
+    color: #fff; 
+    background-color: #007bff;
+    font-weight: 600;
+}
+
+/* 主要表单区域 */
+.main-form { 
+    background: #fff; 
+    padding: 1.8rem; 
+    border-radius: 8px; 
+    border: 1px solid #e0e0e0; 
+    margin-bottom: 1.5rem; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* 表单组 */
+.form-group { 
+    margin-bottom: 1.3rem; 
+}
+
+.form-group label { 
+    display: block; 
+    font-weight: 600; 
+    margin-bottom: 0.6rem; 
+    font-size: 0.95rem; 
+    color: #444;
+}
+
+/* 复选框对齐 - 修复垂直居中 */
+.checkbox-label { 
+    font-size: 0.95rem !important; 
+    font-weight: normal !important; 
+    display: flex; 
+    align-items: center; 
+    gap: 0.7rem;
+    margin-bottom: 0.7rem;
+    cursor: pointer;
+    padding: 0.2rem 0;
+    line-height: 1.4; /* 控制文字行高 */
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: auto !important;
+    margin: 0;
+    flex-shrink: 0;
+    transform: scale(1.1);
+    vertical-align: middle;
+    align-self: center; /* 强制checkbox自身居中 */
+    position: relative;
+    top: 0; /* 确保没有额外偏移 */
+}
+
+.checkbox-group { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 0.3rem;
+}
+
+/* 修复表单行布局 - 更紧凑的间距 */
+.form-row { 
+    display: flex; 
+    gap: 0.8rem; /* 减小间距使其更紧凑 */
+    align-items: flex-end; 
+    flex-wrap: wrap; 
+    margin-bottom: 1.2rem;
+}
+
+.form-row .form-group { 
+    flex: 1; 
+    min-width: 220px;
+    margin-bottom: 0;
+}
+
+/* 关键修复：交换按钮更紧凑 */
+.swap-button-container { 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    flex: 0 0 40px; /* 减小宽度 */
+    height: 100%; 
+    padding-bottom: 0.1rem; 
+}
+
+.swap-button {
+    font-size: 1.2rem;
+    padding: 0;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    border-radius: 50%;
+    transition: all 0.2s;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.swap-button:hover {
+    background: transparent;
+    border-color: transparent;
+    transform: rotate(180deg);
+}
+
+/* 输入框样式 */
+input, select, textarea { 
+    width: 100%; 
+    padding: 0.7rem; 
+    border-radius: 4px; 
+    border: 1px solid #ced4da; 
+    box-sizing: border-box; 
+    font-size: 0.95rem; 
+    transition: border-color 0.2s;
+    background-color: #fff;
+}
+
+input:focus, select:focus, textarea:focus { 
+    outline: none; 
+    border-color: #007bff; 
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+}
+
+/* 文件上传样式 */
+input[type="file"] { 
+    padding: 1rem; 
+    border: 2px dashed #ccc; 
+    border-radius: 6px; 
+    background: #fafafa; 
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.95rem;
+}
+
+input[type="file"]:hover { 
+    border-color: #007bff; 
+    background: #f0f8ff;
+}
+
+input[type="file"]:focus { 
+    border-color: #007bff; 
+    background: #f0f8ff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+}
+
+/* 按钮样式 */
+#submit-btn { 
+    width: 100%; 
+    background-color: #007bff; 
+    color: white; 
+    padding: 1rem 1.5rem; 
+    border: none; 
+    border-radius: 6px; 
+    font-size: 1.1rem; 
+    font-weight: 600;
+    cursor: pointer; 
+    transition: all 0.2s; 
+    margin-top: 0.8rem; 
+    box-shadow: 0 2px 4px rgba(0,123,255,0.2);
+}
+
+#submit-btn:hover:not(:disabled) { 
+    background-color: #0056b3; 
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,123,255,0.3);
+}
+
+#submit-btn:disabled { 
+    background-color: #6c757d; 
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* 进度区域 */
+.progress-area { 
+    background: #fff; 
+    padding: 1.8rem; 
+    border-radius: 8px; 
+    border: 1px solid #e0e0e0;
+    margin-top: 1rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.progress-area h3 { 
+    margin-top: 0; 
+    margin-bottom: 1rem; 
+    color: #333;
+    font-size: 1.2rem;
+}
+
+#status-text { 
+    margin-bottom: 1rem; 
+    font-size: 1rem;
+    color: #555;
+    min-height: 1.5rem;
+}
+
+#total-progress-bar { 
+    width: 100%; 
+    height: 20px; 
+    border-radius: 10px; 
+    margin-bottom: 1rem;
+    border: none;
+}
+
+#total-progress-bar::-webkit-progress-bar {
+    background-color: #e9ecef;
+    border-radius: 10px;
+}
+
+#total-progress-bar::-webkit-progress-value {
+    background-color: #007bff;
+    border-radius: 10px;
+    transition: width 0.3s ease;
+}
+
+/* 高级设置区域 - 统一布局 */
+details { 
+    background: #f8f9fa; 
+    padding: 1.5rem; 
+    border-radius: 8px; 
+    border: 1px solid #e0e0e0; 
+}
+
+/* 高级设置内部表单组统一间距 */
+details .form-group {
+    margin-bottom: 1rem; /* 统一间距 */
+}
+
+/* 高级设置最后一个表单组不需要底部间距 */
+details .form-group:last-child {
+    margin-bottom: 0;
+}
+
+summary { 
+    font-weight: 600; 
+    cursor: pointer; 
+    font-size: 1.1rem; 
+    padding: 0.5rem 0; 
+    color: #495057;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    user-select: none;
+}
+
+summary::-webkit-details-marker {
+    display: none;
+}
+
+summary:hover {
+    color: #007bff;
+}
+
+details details { 
+    border: none; 
+    padding: 1rem 0 0 0; 
+    margin-top: 1rem; 
+    background: transparent;
+}
+
+details details summary { 
+    font-size: 1rem; 
+    font-weight: 600; 
+    color: #444;
+}
+
+/* 统一嵌套设置的表单组间距 */
+details details .form-group {
+    margin-bottom: 0.8rem;
+}
+
+details details .form-group:last-child {
+    margin-bottom: 0;
+}
+
+/* 错误显示 */
+#error-display { 
+    color: #721c24; 
+    background-color: #f8d7da; 
+    padding: 1rem 1.2rem; 
+    border-radius: 6px; 
+    margin-bottom: 1rem; 
+    white-space: pre-wrap; 
+    word-wrap: break-word; 
+    border: 1px solid #f5c6cb;
+    border-left: 4px solid #dc3545;
+}
+
+/* 下载链接 */
+#download-area {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e9ecef;
+}
+
+#download-links a { 
+    display: block; 
+    margin: 0.6rem 0; 
+    padding: 0.9rem 1.2rem; 
+    background: #28a745; 
+    color: white; 
+    text-align: center; 
+    text-decoration: none; 
+    border-radius: 6px; 
+    font-weight: 600; 
+    transition: all 0.2s;
+    box-shadow: 0 2px 4px rgba(40,167,69,0.2);
+}
+
+#download-links a:hover { 
+    background: #218838; 
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(40,167,69,0.3);
+}
+
+/* 范围输入样式 */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: #ddd;
+    border-radius: 3px;
+    outline: none;
+    margin: 0.5rem 0;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #007bff;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #007bff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+output {
+    display: inline-block;
+    margin-left: 0.8rem;
+    font-weight: 600;
+    color: #007bff;
+    min-width: 2rem;
+}
+
+/* 数字输入框 */
+input[type="number"] {
+    max-width: 150px;
+}
+
+/* 响应式设计 - 修复手机端显示问题 */
+@media (max-width: 768px) {
+    .header {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+        align-items: center;
+    }
+    
+    /* 手机端语言切换器优化 */
+    .lang-switcher {
+        width: 100%;
+        max-width: 300px;
+        justify-content: center;
+    }
+    
+    .lang-switcher a {
+        padding: 0.5rem 1rem;
+        font-size: 0.95rem;
+    }
+    
+    /* 修复表单行布局 - 更紧凑 */
+    .form-row { 
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.4rem; /* 手机端更小的间距 */
+        align-items: flex-end;
+    }
+    
+    .form-row .form-group { 
+        flex: 1 1 calc(50% - 25px); /* 调整计算值以适应更小的间距 */
+        min-width: calc(50% - 25px);
+    }
+    
+    /* 手机端交换按钮样式 - 更紧凑 */
+    .swap-button-container { 
+        flex: 0 0 35px; /* 减小宽度 */
+        padding-bottom: 0.1rem;
+    }
+    
+    .swap-button {
+        width: 32px;
+        height: 32px;
+        font-size: 1rem;
+        background-color: #f8f9fa;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .swap-button:hover {
+        background-color: #e9ecef;
+    }
+    
+    .main-form {
+        padding: 1.2rem;
+    }
+    
+    .progress-area {
+        padding: 1.2rem;
+    }
+    
+    details {
+        padding: 1rem;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        margin: 1rem auto;
+        padding: 0 0.5rem;
+    }
+    
+    h1 {
+        font-size: 1.5rem;
+    }
+    
+    /* 小屏幕语言切换器进一步优化 */
+    .lang-switcher {
+        gap: 0.5rem;
+    }
+    
+    .lang-switcher a {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.9rem;
+    }
+    
+    .lang-switcher span {
+        font-size: 0.9rem;
+    }
+    
+    /* 超小屏幕下采用垂直布局 */
+    .form-row {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .form-row .form-group {
+        flex: 1 1 100%;
+        min-width: 100%;
+    }
+    
+    /* 交换按钮在垂直布局中居中 */
+    .swap-button-container {
+        flex: none;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        padding: 0.5rem 0;
+        order: 1;
+    }
+    
+    .form-row .form-group:first-child {
+        order: 0;
+    }
+    
+    .form-row .form-group:last-child {
+        order: 2;
+    }
+    
+    .main-form {
+        padding: 1rem;
+    }
+}
+
+/* 确保隐藏元素真正隐藏 */
+[style*="display: none"] {
+    display: none !important;
+}
+
+/* 加载动画 */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+#submit-btn:disabled::after {
+    content: "⟳";
+    display: inline-block;
+    margin-left: 0.5rem;
+    animation: spin 1s linear infinite;
+}
+
+/* PWA安装提示样式 */
+.install-prompt {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    color: white;
+    padding: 1rem;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    z-index: 1000;
+}
+
+.install-prompt.show {
+    transform: translateY(0);
+}
+
+.install-prompt-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.install-prompt-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+
+.install-prompt-text {
+    flex: 1;
+}
+
+.install-prompt-text h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.install-prompt-text p {
+    margin: 0;
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.install-prompt-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.install-btn, .dismiss-btn {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.install-btn {
+    background: white;
+    color: #007bff;
+}
+
+.install-btn:hover {
+    background: #f8f9fa;
+    transform: translateY(-1px);
+}
+
+.dismiss-btn {
+    background: rgba(255,255,255,0.2);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.3);
+}
+
+.dismiss-btn:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+@media (max-width: 600px) {
+    .install-prompt-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 0.8rem;
+    }
+    
+    .install-prompt-buttons {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+
+/* 修复高级选项6个选项的均匀分布 */
+details:last-child .form-row .form-group.checkbox-group {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0.8rem; /* 统一间距 */
+    align-items: stretch;
+}
+
+/* 移除checkbox-label的额外margin，使用gap统一控制 */
+details:last-child .checkbox-label {
+    margin-bottom: 0 !important;
+    padding: 0.3rem 0;
+}
+
+/* 数字输入框区域样式统一 */
+details:last-child .form-group.checkbox-group label[for="max_pages_per_part"] {
+    margin-top: 0 !important; /* 移除内联样式的影响 */
+    font-size: 0.95rem !important;
+    font-weight: 600 !important;
+    margin-bottom: 0.6rem !important;
+    display: block;
+}
+
+details:last-child .form-group.checkbox-group input[type="number"] {
+    margin-top: 0;
+    max-width: 120px;
+}
+
+/* 确保左右两列高度对齐 */
+details:last-child .form-row {
+    align-items: flex-start;
+}
+
+/* 移动端优化：6个选项垂直排列 */
+@media (max-width: 768px) {
+    details:last-child .form-row {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    details:last-child .form-group.checkbox-group {
+        gap: 0.8rem;
+    }
+}
