@@ -1,21 +1,9 @@
-# 核心依赖
 Flask>=2.3.0
 Werkzeug>=2.3.0
 gunicorn>=21.0.0
-
-# PDF翻译
-babeldoc @ git+https://github.com/funstory-ai/BabelDOC.git@8d77e9c19ddc8b21d4388335ebfc28a05cd3979e
-openai>=1.80.0
 requests>=2.31.0
-
-# 修正版本约束
-rapidocr-onnxruntime
-pymupdf
-numpy
-pillow>=10.0.0,<12.0.0
-opencv-python-headless>=4.8.0,<5.0.0
-
-# 基础库
-pyyaml>=6.0
 python-dotenv>=1.0.0
-packaging>=23.0
+openai>=1.80.0
+
+# 移除numpy限制，让babeldoc自己管理
+babeldoc @ git+https://github.com/funstory-ai/BabelDOC.git@8d77e9c19ddc8b21d4388335ebfc28a05cd3979e
