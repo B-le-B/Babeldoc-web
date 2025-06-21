@@ -10,3 +10,6 @@ opencv-python-headless>=4.8.0
 
 # 暂时先不安装babeldoc，让基础应用跑起来
 # babeldoc @ git+https://github.com/funstory-ai/BabelDOC.git@8d77e9c19ddc8b21d4388335ebfc28a05cd3979e
+
+# 添加轻量PDF处理
+PyPDF2>=3.0.0
