@@ -11,28 +11,58 @@ import io
 import re
 import uuid
 
-# --- PWA 基础注入 (简化版) ---
+import streamlit.components.v1 as components  # 使用兼容性更好的 components
+
+# --- PWA 最终注入方案 (高兼容性版本) ---
+
 st.set_page_config(
     page_title="PDF 智能翻译",
-    page_icon="📚" 
+    page_icon="📚"
 )
 
-# 我们依然需要注入 manifest 链接和 service worker 注册脚本
-# 但这次，因为 config.toml 会确保路径正确，所以注入会更可靠
-st.html("""
-    <head>
-        <link rel="manifest" href="/static/manifest.json">
-    </head>
-    <script>
-        if ('serviceWorker' in navigator) {
-          window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/static/service-worker.js')
-              .then(reg => console.log('PWA: Service worker registered.', reg))
-              .catch(err => console.error('PWA: Service worker registration failed.', err));
-          });
+# 注入一个脚本，该脚本负责在客户端完成所有PWA的设置
+pwa_injection_script = """
+<script>
+const MANIFEST_URL = "/static/manifest.json";
+const SERVICE_WORKER_URL = "/static/service-worker.js";
+
+// 函数：修改或添加 <link rel="manifest">
+function injectManifest() {
+    let manifestLink = document.querySelector('link[rel="manifest"]');
+    if (manifestLink) {
+        if (manifestLink.href !== MANIFEST_URL) {
+            manifestLink.href = MANIFEST_URL;
+            console.log('PWA: Manifest link updated.');
         }
-    </script>
-""", height=0)
+    } else {
+        manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = MANIFEST_URL;
+        document.head.appendChild(manifestLink);
+        console.log('PWA: Manifest link added.');
+    }
+}
+
+// 函数：注册 Service Worker
+function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register(SERVICE_WORKER_URL)
+            .then(reg => console.log('PWA: Service worker registered.', reg.scope))
+            .catch(err => console.error('PWA: Service worker registration failed.', err));
+    }
+}
+
+// 使用 DOMContentLoaded 确保在 DOM 加载完成后执行
+window.addEventListener('DOMContentLoaded', () => {
+    injectManifest();
+    registerServiceWorker();
+});
+</script>
+"""
+
+# 使用 st.components.v1.html 进行注入，这个函数不会引起TypeError
+components.html(pwa_injection_script, height=0)
+
 # --- 结束注入 ---
 
 
