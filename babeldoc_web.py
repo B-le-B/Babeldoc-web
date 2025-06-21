@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components  # 导入组件库
 import subprocess
 import tempfile
 import os
@@ -12,64 +11,29 @@ import io
 import re
 import uuid
 
-# ==================== PWA 终极注入方案 ====================
-# 使用 JavaScript 在客户端动态修改 head 并注册 Service Worker
+# --- PWA 基础注入 (简化版) ---
+st.set_page_config(
+    page_title="PDF 智能翻译",
+    page_icon="📚" 
+)
 
-pwa_js_injection = """
-<script>
-const MANIFEST_URL = "/static/manifest.json";
-const SERVICE_WORKER_URL = "/static/service-worker.js";
-
-// 1. 函数：修改或添加 <link rel="manifest">
-function injectManifest() {
-    let manifestLink = document.querySelector('link[rel="manifest"]');
-    if (manifestLink) {
-        // 如果已存在，强制修改其 href
-        if (manifestLink.href !== MANIFEST_URL) {
-            manifestLink.href = MANIFEST_URL;
-            console.log('PWA: Manifest link updated to:', MANIFEST_URL);
+# 我们依然需要注入 manifest 链接和 service worker 注册脚本
+# 但这次，因为 config.toml 会确保路径正确，所以注入会更可靠
+st.html("""
+    <head>
+        <link rel="manifest" href="/static/manifest.json">
+    </head>
+    <script>
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/static/service-worker.js')
+              .then(reg => console.log('PWA: Service worker registered.', reg))
+              .catch(err => console.error('PWA: Service worker registration failed.', err));
+          });
         }
-    } else {
-        // 如果不存在，则创建并添加
-        manifestLink = document.createElement('link');
-        manifestLink.rel = 'manifest';
-        manifestLink.href = MANIFEST_URL;
-        document.head.appendChild(manifestLink);
-        console.log('PWA: Manifest link created and added:', MANIFEST_URL);
-    }
-}
-
-// 2. 函数：注册 Service Worker
-function registerServiceWorker() {
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register(SERVICE_WORKER_URL)
-            .then(function(registration) {
-                console.log('PWA: ServiceWorker registration successful, scope:', registration.scope);
-            })
-            .catch(function(err) {
-                console.error('PWA: ServiceWorker registration failed:', err);
-            });
-    } else {
-        console.log('PWA: Service Worker not supported.');
-    }
-}
-
-// 3. 执行注入和注册
-// 使用 DOMContentLoaded 确保在 DOM 加载完成后执行
-// 使用 setTimeout 增加一个微小的延迟，以确保我们的脚本在Streamlit自身的脚本之后运行
-window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-        injectManifest();
-        registerServiceWorker();
-    }, 50); // 50毫秒延迟
-});
-</script>
-"""
-
-# 使用 components.html 注入这个脚本
-components.html(pwa_js_injection, height=0)
-
-# =========================================================
+    </script>
+""", height=0)
+# --- 结束注入 ---
 
 
 # 自定义CSS样式
