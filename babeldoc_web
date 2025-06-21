@@ -1,0 +1,63 @@
+import streamlit as st
+import os
+
+st.set_page_config(page_title="Deployment Debugger", layout="wide")
+
+st.title("🔬 Streamlit Cloud - File System Inspector")
+st.markdown("---")
+
+# 获取当前工作目录
+try:
+    cwd = os.getcwd()
+    st.header("1. Current Working Directory")
+    st.code(cwd, language="text")
+
+    st.header("2. Contents of the Current Directory (`.`)")
+    try:
+        root_contents = os.listdir(cwd)
+        st.code("\n".join(root_contents), language="text")
+    except Exception as e:
+        st.error(f"Could not list current directory: {e}")
+
+    # 检查 .streamlit 文件夹是否存在以及其内容
+    st.header("3. Checking for `.streamlit` directory")
+    streamlit_dir_path = os.path.join(cwd, ".streamlit")
+    if os.path.isdir(streamlit_dir_path):
+        st.success(f"✅ Found directory: {streamlit_dir_path}")
+        try:
+            streamlit_contents = os.listdir(streamlit_dir_path)
+            st.write("Contents:")
+            st.code("\n".join(streamlit_contents), language="text")
+
+            # 尝试读取 config.toml 的内容
+            config_path = os.path.join(streamlit_dir_path, "config.toml")
+            if "config.toml" in streamlit_contents:
+                 st.subheader("Contents of `config.toml`")
+                 try:
+                     with open(config_path, 'r') as f:
+                         config_content = f.read()
+                     st.code(config_content, language='toml')
+                 except Exception as e_read:
+                     st.error(f"Could not read config.toml: {e_read}")
+
+        except Exception as e_list:
+            st.error(f"Could not list .streamlit directory contents: {e_list}")
+    else:
+        st.error("❌ Directory `.streamlit` not found.")
+
+    # 检查 static 文件夹是否存在以及其内容
+    st.header("4. Checking for `static` directory")
+    static_dir_path = os.path.join(cwd, "static")
+    if os.path.isdir(static_dir_path):
+        st.success(f"✅ Found directory: {static_dir_path}")
+        try:
+            static_contents = os.listdir(static_dir_path)
+            st.write("Contents:")
+            st.code("\n".join(static_contents), language="text")
+        except Exception as e:
+            st.error(f"Could not list static directory contents: {e}")
+    else:
+        st.error("❌ Directory `static` not found.")
+
+except Exception as e:
+    st.error(f"A critical error occurred while inspecting the file system: {e}")
