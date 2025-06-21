@@ -12,38 +12,64 @@ import io
 import re
 import uuid
 
-# PWA 配置
-pwa_head_injection = """
-<head>
-    <meta name="theme-color" content="#0068C9">
-    <link rel="manifest" href="/static/manifest.json">
-    <link rel="apple-touch-icon" href="/static/icons/192x192.png">
-</head>
-"""
+# ==================== PWA 终极注入方案 ====================
+# 使用 JavaScript 在客户端动态修改 head 并注册 Service Worker
 
-pwa_body_injection = """
+pwa_js_injection = """
 <script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function() {
-    navigator.serviceWorker.register('/static/service-worker.js').then(function(registration) {
-      console.log('PWA: ServiceWorker registration successful, scope: ', registration.scope);
-    }, function(err) {
-      console.error('PWA: ServiceWorker registration failed: ', err);
-    });
-  });
-} else {
-    console.log('PWA: Service Worker not supported by this browser.');
+const MANIFEST_URL = "/static/manifest.json";
+const SERVICE_WORKER_URL = "/static/service-worker.js";
+
+// 1. 函数：修改或添加 <link rel="manifest">
+function injectManifest() {
+    let manifestLink = document.querySelector('link[rel="manifest"]');
+    if (manifestLink) {
+        // 如果已存在，强制修改其 href
+        if (manifestLink.href !== MANIFEST_URL) {
+            manifestLink.href = MANIFEST_URL;
+            console.log('PWA: Manifest link updated to:', MANIFEST_URL);
+        }
+    } else {
+        // 如果不存在，则创建并添加
+        manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = MANIFEST_URL;
+        document.head.appendChild(manifestLink);
+        console.log('PWA: Manifest link created and added:', MANIFEST_URL);
+    }
 }
+
+// 2. 函数：注册 Service Worker
+function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register(SERVICE_WORKER_URL)
+            .then(function(registration) {
+                console.log('PWA: ServiceWorker registration successful, scope:', registration.scope);
+            })
+            .catch(function(err) {
+                console.error('PWA: ServiceWorker registration failed:', err);
+            });
+    } else {
+        console.log('PWA: Service Worker not supported.');
+    }
+}
+
+// 3. 执行注入和注册
+// 使用 DOMContentLoaded 确保在 DOM 加载完成后执行
+// 使用 setTimeout 增加一个微小的延迟，以确保我们的脚本在Streamlit自身的脚本之后运行
+window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        injectManifest();
+        registerServiceWorker();
+    }, 50); // 50毫秒延迟
+});
 </script>
 """
 
-# 将 PWA 的 head 部分注入到 HTML 的 <head>
-# 注意：这个方法会寻找<head>并注入，但有时可能依然注入到<body>。不过它比markdown更可靠。
-# 实践中，现代浏览器即使在<body>中找到manifest链接也能识别。
-components.html(pwa_head_injection, height=0)
+# 使用 components.html 注入这个脚本
+components.html(pwa_js_injection, height=0)
 
-# 将 PWA 的 body (script) 部分注入到 HTML 的 <body>
-components.html(pwa_body_injection, height=0)
+# =========================================================
 
 
 # 自定义CSS样式
