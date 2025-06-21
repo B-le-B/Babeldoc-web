@@ -38,8 +38,8 @@ try:
     # 定义文件路径
     static_dir = "static"
     icons_dir = os.path.join(static_dir, "icons")
-    icon_192_path = os.path.join(icons_dir, "icon-192.png")
-    icon_512_path = os.path.join(icons_dir, "icon-512.png")
+    icon_192_path = os.path.join(icons_dir, "192x192.png")
+    icon_512_path = os.path.join(icons_dir, "512x512.png")
     manifest_path = os.path.join(static_dir, "manifest.json")
     sw_path = os.path.join(static_dir, "service-worker.js")
     offline_path = os.path.join(static_dir, "offline.html")
