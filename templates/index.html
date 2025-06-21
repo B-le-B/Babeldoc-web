@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ texts.title }}</title>
+    
+    <!-- PWA相关meta标签 -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#007bff">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="PDF翻译">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="PDF Translator">
+    
+    <!-- 只使用现有的图标 -->
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="header">
+        <h1>{{ texts.title }}</h1>
+        <div class="lang-switcher">
+            <a href="/?lang=zh" class="{{ 'active' if lang == 'zh' }}">中文</a>
+            <span>|</span>
+            <a href="/?lang=en" class="{{ 'active' if lang == 'en' }}">English</a>
+        </div>
+    </header>
+    
+    <!-- 错误显示区域 -->
+    <div id="error-display" style="display: none;"></div>
+
+    <!-- 主要表单 -->
+    <div class="main-form">
+        <form id="translate-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="files">{{ texts.upload_label }}</label>
+                <input type="file" id="files" name="files" accept=".pdf" required multiple>
+            </div>
+            <button type="submit" id="submit-btn">{{ texts.start_button }}</button>
+            
+            <!-- 高级设置 -->
+            <details style="margin-top: 1.5rem;">
+                <summary>{{ texts.all_configs }}</summary>
+                
+                <!-- 语言设置 -->
+                <details open>
+                    <summary>{{ texts.lang_settings }}</summary>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="lang_in">{{ texts.source_lang }}</label>
+                            <select id="lang_in" name="lang_in">
+                                <option value="en" selected>English (en)</option>
+                                <option value="zh">中文 (zh)</option>
+                                <option value="ja">日本語 (ja)</option>
+                                <option value="ko">한국어 (ko)</option>
+                                <option value="fr">Français (fr)</option>
+                                <option value="de">Deutsch (de)</option>
+                                <option value="pt">Português (pt)</option>
+                                <option value="es">Español (es)</option>
+                                <option value="ru">Русский (ru)</option>
+                                <option value="it">Italiano (it)</option>
+                                <option value="nl">Nederlands (nl)</option>
+                                <option value="ar">العربية (ar)</option>
+                            </select>
+                        </div>
+                        <div class="swap-button-container">
+                            <button type="button" id="swap-lang-btn" class="swap-button" title="{{ texts.swap_lang }}">⇄</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="lang_out">{{ texts.target_lang }}</label>
+                            <select id="lang_out" name="lang_out">
+                                <option value="zh" selected>中文 (zh)</option>
+                                <option value="en">English (en)</option>
+                                <option value="ja">日本語 (ja)</option>
+                                <option value="ko">한국어 (ko)</option>
+                                <option value="fr">Français (fr)</option>
+                                <option value="de">Deutsch (de)</option>
+                                <option value="pt">Português (pt)</option>
+                                <option value="es">Español (es)</option>
+                                <option value="ru">Русский (ru)</option>
+                                <option value="it">Italiano (it)</option>
+                                <option value="nl">Nederlands (nl)</option>
+                                <option value="ar">العربية (ar)</option>
+                            </select>
+                        </div>
+                    </div>
+                </details>
+
+                <!-- 模型设置 -->
+                <details>
+                    <summary>{{ texts.model_settings }}</summary>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="use_openai" name="use_openai" checked> 
+                            {{ texts.use_model }}
+                        </label>
+                    </div>
+                    <div id="openai-settings">
+                        <input type="hidden" id="provider_name" name="provider_name" value="SiliconFlow">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="provider_select">{{ texts.provider }}</label>
+                                <select id="provider_select">
+                                    <option value="SiliconFlow">SiliconFlow</option>
+                                    <option value="ModelScope">ModelScope</option>
+                                    <option value="OpenRouter">OpenRouter</option>
+                                    <option value="OpenAI">OpenAI</option>
+                                    <option value="Custom">{{ texts.custom_provider }}</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="openai_base_url">{{ texts.api_base_url }}</label>
+                                <input type="text" id="openai_base_url" name="openai_base_url">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="openai_model">{{ texts.model_name }}</label>
+                                <input type="text" id="openai_model" name="openai_model">
+                            </div>
+                            <div class="form-group">
+                                <label for="openai_key">{{ texts.api_key }}</label>
+                                <input type="password" id="openai_key" name="openai_key">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="custom_prompt">{{ texts.custom_prompt }}</label>
+                            <textarea id="custom_prompt" name="custom_prompt" rows="2"></textarea>
+                        </div>
+                    </div>
+                </details>
+
+                <!-- 输出选项 -->
+                <details>
+                    <summary>{{ texts.output_options }}</summary>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pages">{{ texts.page_range }}</label>
+                            <input type="text" id="pages" name="pages" placeholder="{{ texts.page_range_placeholder }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="watermark_mode">{{ texts.watermark }}</label>
+                            <select id="watermark_mode" name="watermark_mode">
+                                <option value="no_watermark" selected>{{ texts.watermark_none }}</option>
+                                <option value="watermarked">{{ texts.watermark_add }}</option>
+                                <option value="both">{{ texts.watermark_both }}</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="no_dual"> {{ texts.no_dual }}
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="no_mono" checked> {{ texts.no_mono }}
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="only_translated"> {{ texts.only_translated }}
+                        </label>
+                    </div>
+                </details>
+
+                <!-- 处理选项 -->
+                <details>
+                    <summary>{{ texts.processing_options }}</summary>
+                    <div class="form-row">
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="skip_scanned" checked> {{ texts.skip_scanned }}
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="split_short_lines" checked> {{ texts.split_short }}
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="translate_table"> {{ texts.translate_table }}
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="skip_clean"> {{ texts.skip_clean }}
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="short_line_factor">{{ texts.split_threshold }}</label>
+                            <input type="number" id="short_line_factor" name="short_line_factor" value="0.8" step="0.1" min="0.1" max="5.0">
+                            <label for="qps" style="margin-top: 1rem;">{{ texts.qps }} (1-20)</label>
+                            <input type="range" id="qps" name="qps" value="3" min="1" max="20" oninput="this.nextElementSibling.value = this.value">
+                            <output>3</output>
+                        </div>
+                    </div>
+                </details>
+
+                <!-- 高级选项 -->
+                <details>
+                    <summary>{{ texts.advanced_options }}</summary>
+                    <div class="form-row">
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="enhance_compatibility"> {{ texts.enhance_compat }}
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="disable_rich_text"> {{ texts.disable_rich_text }}
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="dual_translate_first"> {{ texts.dual_first }}
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="ocr_workaround"> {{ texts.ocr_workaround }}
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="auto_ocr"> {{ texts.auto_ocr }}
+                            </label>
+                            <label for="max_pages_per_part" style="margin-top: 1rem;">{{ texts.max_pages }}</label>
+                            <input type="number" id="max_pages_per_part" name="max_pages_per_part" value="0" min="0">
+                        </div>
+                    </div>
+                </details>
+            </details>
+        </form>
+    </div>
+
+    <!-- 进度区域 -->
+    <div id="progress-area" class="progress-area" style="display: none;">
+        <h3>{{ texts.progress_title }}</h3>
+        <p id="status-text">{{ texts.status_starting }}</p>
+        <progress id="total-progress-bar" value="0" max="100"></progress>
+        
+        <div id="download-area" style="display: none;">
+            <h3>{{ texts.download_title }}</h3>
+            <div id="download-links"></div>
+        </div>
+    </div>
+
+    <!-- PWA安装提示 -->
+    <div id="installPrompt" class="install-prompt" style="display: none;">
+        <div class="install-prompt-content">
+            <div class="install-prompt-icon">📱</div>
+            <div class="install-prompt-text">
+                <h4>{{ '安装应用' if lang == 'zh' else 'Install App' }}</h4>
+                <p>{{ '将PDF翻译工具添加到主屏幕，享受更好的体验' if lang == 'zh' else 'Add PDF Translator to your home screen for a better experience' }}</p>
+            </div>
+            <div class="install-prompt-buttons">
+                <button id="installBtn" class="install-btn">{{ '安装' if lang == 'zh' else 'Install' }}</button>
+                <button id="dismissBtn" class="dismiss-btn">{{ '稍后' if lang == 'zh' else 'Later' }}</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // PWA安装提示逻辑
+        let deferredPrompt;
+        const installPrompt = document.getElementById('installPrompt');
+        const installBtn = document.getElementById('installBtn');
+        const dismissBtn = document.getElementById('dismissBtn');
+
+        // 监听beforeinstallprompt事件
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('PWA: beforeinstallprompt event fired');
+            // 阻止自动弹出
+            e.preventDefault();
+            // 保存事件
+            deferredPrompt = e;
+            // 立即显示安装提示
+            showInstallPrompt();
+        });
+
+        // 页面加载完成后立即显示提示（用于测试和强制显示）
+        window.addEventListener('load', () => {
+            // 延迟1秒确保页面完全加载
+            setTimeout(() => {
+                if (!deferredPrompt) {
+                    console.log('PWA: No beforeinstallprompt event, showing manual prompt');
+                    // 模拟deferredPrompt用于强制显示
+                    deferredPrompt = {
+                        prompt: () => {
+                            console.log('PWA: Manual prompt - redirecting to browser install');
+                            alert('请在浏览器菜单中选择"添加到主屏幕"或"安装应用"');
+                        },
+                        userChoice: Promise.resolve({ outcome: 'dismissed' })
+                    };
+                }
+                showInstallPrompt();
+            }, 1000);
+        });
+
+        // 显示安装提示
+        function showInstallPrompt() {
+            installPrompt.style.display = 'block';
+            setTimeout(() => {
+                installPrompt.classList.add('show');
+            }, 100);
+        }
+
+        // 隐藏安装提示
+        function hideInstallPrompt() {
+            installPrompt.classList.remove('show');
+            setTimeout(() => {
+                installPrompt.style.display = 'none';
+            }, 300);
+        }
+
+        // 安装按钮点击
+        installBtn.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                // 显示安装提示
+                deferredPrompt.prompt();
+                // 等待用户选择
+                const { outcome } = await deferredPrompt.userChoice;
+                console.log(`PWA: User response to the install prompt: ${outcome}`);
+                // 重置
+                deferredPrompt = null;
+                hideInstallPrompt();
+                
+                if (outcome === 'accepted') {
+                    console.log('PWA: User accepted the install prompt');
+                }
+            }
+        });
+
+        // 稍后按钮点击 - 只是关闭，下次打开页面还会提醒
+        dismissBtn.addEventListener('click', () => {
+            hideInstallPrompt();
+        });
+
+        // Service Worker注册
+        if('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(reg => {
+                        console.log('SW registered:', reg.scope);
+                        // 检查更新
+                        reg.addEventListener('updatefound', () => {
+                            console.log('SW: Update found');
+                        });
+                    })
+                    .catch(err => console.log('SW registration failed:', err));
+            });
+        }
+
+        // 监听应用安装完成
+        window.addEventListener('appinstalled', (evt) => {
+            console.log('PWA: App was installed');
+            hideInstallPrompt();
+        });
+    </script>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
