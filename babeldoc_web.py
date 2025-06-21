@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components  # 导入组件库
 import subprocess
 import tempfile
 import os
@@ -11,25 +12,38 @@ import io
 import re
 import uuid
 
-pwa_injection = """
+# PWA 配置
+pwa_head_injection = """
 <head>
     <meta name="theme-color" content="#0068C9">
     <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/192x192.png">
 </head>
+"""
 
+pwa_body_injection = """
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('/static/service-worker.js').then(function(registration) {
-      console.log('ServiceWorker registration successful with scope: ', registration.scope);
+      console.log('PWA: ServiceWorker registration successful, scope: ', registration.scope);
     }, function(err) {
-      console.log('ServiceWorker registration failed: ', err);
+      console.error('PWA: ServiceWorker registration failed: ', err);
     });
   });
+} else {
+    console.log('PWA: Service Worker not supported by this browser.');
 }
 </script>
 """
-st.markdown(pwa_injection, unsafe_allow_html=True)
+
+# 将 PWA 的 head 部分注入到 HTML 的 <head>
+# 注意：这个方法会寻找<head>并注入，但有时可能依然注入到<body>。不过它比markdown更可靠。
+# 实践中，现代浏览器即使在<body>中找到manifest链接也能识别。
+components.html(pwa_head_injection, height=0)
+
+# 将 PWA 的 body (script) 部分注入到 HTML 的 <body>
+components.html(pwa_body_injection, height=0)
 
 
 # 自定义CSS样式
