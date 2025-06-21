@@ -1,19 +1,12 @@
-# Web框架
 Flask>=2.3.0
 Werkzeug>=2.3.0
 gunicorn>=21.0.0
-
-# PDF翻译
-babeldoc @ git+https://github.com/funstory-ai/BabelDOC.git@8d77e9c19ddc8b21d4388335ebfc28a05cd3979e
-
-# AI/API
-openai>=1.80.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+openai>=1.80.0
 
-# PDF处理
-pymupdf>=1.23.0
-pillow>=10.0.0
+# 使用轻量版opencv，去掉GUI部分
+opencv-python-headless>=4.8.0
 
-# OCR (版本兼容)
-rapidocr-onnxruntime<=1.2.3
+# 暂时先不安装babeldoc，让基础应用跑起来
+# babeldoc @ git+https://github.com/funstory-ai/BabelDOC.git@8d77e9c19ddc8b21d4388335ebfc28a05cd3979e
