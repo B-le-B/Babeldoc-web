@@ -3,6 +3,7 @@ name: Sync and Auto Deploy
 
 permissions:
   contents: write
+  workflows: write  # 添加这个权限
 
 on:
   schedule:
