@@ -32,7 +32,7 @@ jobs:
           if [ "$UPSTREAM_COMMITS" -gt 0 ]; then
             echo "Found updates, syncing..."
             
-            if git merge upstream/main --no-edit; then
+            if git merge upstream/main --no-edit --strategy-option=ours .github/workflows/; then
               echo "✅ Merge successful"
             else
               echo "⚠️ Resolving conflicts..."
