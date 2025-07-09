@@ -1,8 +1,8 @@
-# .github/workflows/sync-and-deploy.yml
 name: Sync and Auto Deploy
 
 permissions:
   contents: write
+  pull-requests: write
 
 on:
   schedule:
@@ -14,36 +14,133 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.PAT_TOKEN }}  # 改这里：使用 PAT
+          token: ${{ secrets.PAT_TOKEN }}
 
-      - name: Sync upstream
+      - name: Configure Git
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Add upstream remote
+        run: |
+          # 检查是否已存在 upstream
+          if ! git remote | grep -q upstream; then
+            git remote add upstream https://github.com/funstory-ai/BabelDOC.git
+            echo "✅ Added upstream remote"
+          else
+            echo "ℹ️ Upstream remote already exists"
+          fi
           
-          git remote add upstream https://github.com/funstory-ai/BabelDOC.git || true
-          git fetch upstream
+          # 显示所有远程仓库
+          echo "Current remotes:"
+          git remote -v
+
+      - name: Fetch upstream
+        run: |
+          echo "📥 Fetching upstream..."
+          git fetch upstream main --no-tags || {
+            echo "❌ Failed to fetch upstream"
+            exit 1
+          }
+          echo "✅ Fetch successful"
+
+      - name: Check for updates
+        id: check_updates
+        run: |
+          # 获取当前分支
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch: $CURRENT_BRANCH"
           
+          # 检查是否有更新
           UPSTREAM_COMMITS=$(git rev-list HEAD..upstream/main --count 2>/dev/null || echo "0")
+          echo "UPSTREAM_COMMITS=$UPSTREAM_COMMITS" >> $GITHUB_OUTPUT
           
           if [ "$UPSTREAM_COMMITS" -gt 0 ]; then
-            echo "Found updates, syncing..."
+            echo "📊 Found $UPSTREAM_COMMITS new commits from upstream"
+            echo "has_updates=true" >> $GITHUB_OUTPUT
             
-            if git merge upstream/main --no-edit --strategy-option=ours .github/workflows/; then
-              echo "✅ Merge successful"
-            else
-              echo "⚠️ Resolving conflicts..."
-              git checkout --ours requirements.txt || true
-              git checkout --ours package.json || true
-              git add .
-              git commit -m "Resolve conflicts"
-            fi
-            
-            git push origin main
-            echo "🚀 Code updated, Streamlit Cloud will auto-deploy!"
+            # 显示即将合并的提交
+            echo "Commits to be merged:"
+            git log HEAD..upstream/main --oneline
           else
-            echo "📌 No updates available"
+            echo "✅ Already up to date with upstream"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Sync with upstream
+        if: steps.check_updates.outputs.has_updates == 'true'
+        run: |
+          echo "🔄 Starting sync process..."
+          
+          # 保存本地特定文件的状态
+          git stash push -m "Save local configs" -- .github/workflows/ requirements.txt package.json 2>/dev/null || true
+          
+          # 尝试合并
+          if git merge upstream/main --no-edit -X ours; then
+            echo "✅ Merge completed successfully"
+          else
+            echo "⚠️ Merge conflicts detected, attempting to resolve..."
+            
+            # 对于冲突的文件，保留本地版本
+            conflicted_files=$(git diff --name-only --diff-filter=U)
+            
+            if [ -n "$conflicted_files" ]; then
+              echo "Conflicted files:"
+              echo "$conflicted_files"
+              
+              for file in $conflicted_files; do
+                if [[ "$file" == "requirements.txt" ]] || [[ "$file" == "package.json" ]] || [[ "$file" == .github/workflows/* ]]; then
+                  echo "Keeping local version of $file"
+                  git checkout --ours "$file"
+                  git add "$file"
+                else
+                  echo "Accepting upstream version of $file"
+                  git checkout --theirs "$file"
+                  git add "$file"
+                fi
+              done
+              
+              # 提交解决冲突
+              git commit -m "Merge upstream changes with conflict resolution
+
+Conflicts resolved:
+$conflicted_files"
+            fi
+          fi
+          
+          # 恢复本地配置（如果有的话）
+          git stash pop 2>/dev/null || true
+
+      - name: Push changes
+        if: steps.check_updates.outputs.has_updates == 'true'
+        run: |
+          echo "📤 Pushing changes to origin..."
+          
+          # 先拉取最新的远程更改以避免冲突
+          git pull origin main --rebase || {
+            echo "⚠️ Pull failed, attempting to resolve..."
+            git rebase --abort 2>/dev/null || true
+            git pull origin main --no-rebase
+          }
+          
+          # 推送更改
+          if git push origin main; then
+            echo "✅ Successfully pushed to origin"
+            echo "🚀 Streamlit Cloud will auto-deploy the changes!"
+          else
+            echo "❌ Push failed"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📊 Sync Summary"
+          echo "- Upstream commits: ${{ steps.check_updates.outputs.UPSTREAM_COMMITS }}"
+          echo "- Has updates: ${{ steps.check_updates.outputs.has_updates }}"
+          echo "- Current commit: $(git rev-parse HEAD)"
+          echo "- Current branch: $(git rev-parse --abbrev-ref HEAD)"
