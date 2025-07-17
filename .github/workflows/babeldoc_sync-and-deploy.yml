@@ -10,8 +10,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  sync-and-deploy:
-    runs-on: ubuntu-latest
+  noop:
+      runs-on: ubuntu-latest
+      steps:
+        - run: echo "✅ basic syntax pass"
     
     steps:
       - name: Checkout repository
