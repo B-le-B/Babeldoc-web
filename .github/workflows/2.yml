@@ -24,3 +24,24 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Add upstream remote
+        run: |
+          if ! git remote | grep -q upstream; then
+            git remote add upstream https://github.com/funstory-ai/BabelDOC.git
+            echo "✅ Added upstream remote"
+          else
+            echo "ℹ️ Upstream remote already exists"
+            git remote set-url upstream https://github.com/funstory-ai/BabelDOC.git
+          fi
+          echo "Current remotes:"
+          git remote -v
+
+      - name: Fetch upstream
+        run: |
+          echo "📥 Fetching upstream..."
+          git fetch upstream --prune || {
+            echo "❌ Failed to fetch upstream"
+            exit 1
+          }
+          echo "✅ Fetch successful"
