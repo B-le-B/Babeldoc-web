@@ -1,0 +1,249 @@
+name: Sync and Auto Deploy
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+jobs:
+  sync-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Add upstream remote
+        run: |
+          # 检查是否已存在 upstream
+          if ! git remote | grep -q upstream; then
+            git remote add upstream https://github.com/funstory-ai/BabelDOC.git
+            echo "✅ Added upstream remote"
+          else
+            echo "ℹ️ Upstream remote already exists"
+            # 更新 upstream URL 以防万一
+            git remote set-url upstream https://github.com/funstory-ai/BabelDOC.git
+          fi
+          
+          # 显示所有远程仓库
+          echo "Current remotes:"
+          git remote -v
+
+      - name: Fetch upstream
+        run: |
+          echo "📥 Fetching upstream..."
+          # 获取所有分支信息
+          git fetch upstream --prune || {
+            echo "❌ Failed to fetch upstream"
+            exit 1
+          }
+          echo "✅ Fetch successful"
+
+      - name: Get current branch
+        id: get_branch
+        run: |
+          # 获取当前分支
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "current_branch=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+          echo "Current branch: $CURRENT_BRANCH"
+          
+          # 确保我们在正确的分支上
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+            echo "⚠️ Not on main branch, switching..."
+            git checkout main || {
+              echo "❌ Failed to checkout main branch"
+              exit 1
+            }
+          fi
+
+      - name: Check for updates
+        id: check_updates
+        run: |
+          # 确保本地 main 分支是最新的
+          git pull origin main --ff-only || {
+            echo "⚠️ Cannot fast-forward pull, will handle in sync step"
+          }
+          
+          # 检查是否有更新
+          UPSTREAM_COMMITS=$(git rev-list HEAD..upstream/main --count 2>/dev/null || echo "0")
+          echo "upstream_commits=$UPSTREAM_COMMITS" >> $GITHUB_OUTPUT
+          
+          if [ "$UPSTREAM_COMMITS" -gt 0 ]; then
+            echo "📊 Found $UPSTREAM_COMMITS new commits from upstream"
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            
+            # 显示即将合并的提交
+            echo "Commits to be merged:"
+            git log HEAD..upstream/main --oneline --max-count=10
+          else
+            echo "✅ Already up to date with upstream"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create backup branch
+        if: steps.check_updates.outputs.has_updates == 'true'
+        run: |
+          # 创建备份分支以防万一
+          BACKUP_BRANCH="backup-$(date +%Y%m%d-%H%M%S)"
+          git branch $BACKUP_BRANCH
+          echo "📋 Created backup branch: $BACKUP_BRANCH"
+
+      - name: Sync with upstream
+        if: steps.check_updates.outputs.has_updates == 'true'
+        id: sync
+        run: |
+          echo "🔄 Starting sync process..."
+          
+          # 保存本地特定文件的内容
+          echo "📦 Backing up local configuration files..."
+          mkdir -p /tmp/local_backup
+          
+          # 备份本地配置文件
+          if [ -f "requirements.txt" ]; then
+            cp requirements.txt /tmp/local_backup/
+          fi
+          if [ -f "package.json" ]; then
+            cp package.json /tmp/local_backup/
+          fi
+          if [ -d ".github/workflows" ]; then
+            cp -r .github/workflows /tmp/local_backup/
+          fi
+          
+          # 尝试合并
+          echo "🔀 Attempting to merge upstream/main..."
+          if git merge upstream/main --no-edit --strategy=ort --strategy-option=ours; then
+            echo "✅ Merge completed successfully"
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Merge conflicts detected, attempting to resolve..."
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            
+            # 获取冲突文件列表
+            conflicted_files=$(git diff --name-only --diff-filter=U)
+            
+            if [ -n "$conflicted_files" ]; then
+              echo "Conflicted files:"
+              echo "$conflicted_files"
+              
+              # 处理每个冲突文件
+              for file in $conflicted_files; do
+                echo "Processing: $file"
+                
+                # 对于特定文件保留本地版本
+                if [[ "$file" == "requirements.txt" ]] || \
+                   [[ "$file" == "package.json" ]] || \
+                   [[ "$file" == ".github/workflows/"* ]]; then
+                  echo "  → Keeping local version"
+                  if [ -f "/tmp/local_backup/$(basename $file)" ]; then
+                    cp "/tmp/local_backup/$(basename $file)" "$file"
+                  else
+                    git checkout --ours "$file"
+                  fi
+                  git add "$file"
+                else
+                  echo "  → Accepting upstream version"
+                  git checkout --theirs "$file"
+                  git add "$file"
+                fi
+              done
+              
+              # 检查是否还有未解决的冲突
+              if git diff --check; then
+                # 提交解决冲突
+                git commit -m "Merge upstream changes with conflict resolution
+
+Automated sync from upstream repository
+Conflicts resolved by keeping local versions of:
+- requirements.txt
+- package.json
+- .github/workflows/*
+
+Upstream: funstory-ai/BabelDOC
+Commits merged: ${{ steps.check_updates.outputs.upstream_commits }}"
+                echo "✅ Conflicts resolved and committed"
+              else
+                echo "❌ Failed to resolve all conflicts"
+                git merge --abort
+                exit 1
+              fi
+            fi
+          fi
+          
+          # 恢复本地配置文件（确保关键文件保持不变）
+          if [ -d "/tmp/local_backup" ]; then
+            echo "📥 Restoring local configuration files..."
+            if [ -f "/tmp/local_backup/requirements.txt" ]; then
+              cp /tmp/local_backup/requirements.txt .
+              git add requirements.txt
+            fi
+            if [ -f "/tmp/local_backup/package.json" ]; then
+              cp /tmp/local_backup/package.json .
+              git add package.json
+            fi
+            if [ -d "/tmp/local_backup/workflows" ]; then
+              cp -r /tmp/local_backup/workflows/* .github/workflows/
+              git add .github/workflows/
+            fi
+            
+            # 如果有更改，创建一个新的提交
+            if ! git diff --cached --quiet; then
+              git commit -m "Restore local configuration files after merge"
+            fi
+          fi
+
+      - name: Push changes
+        if: steps.check_updates.outputs.has_updates == 'true'
+        run: |
+          echo "📤 Pushing changes to origin..."
+          
+          # 强制推送以确保更新
+          if git push origin main --force-with-lease; then
+            echo "✅ Successfully pushed to origin"
+            echo "🚀 Streamlit Cloud will auto-deploy the changes!"
+          else
+            echo "⚠️ Push with lease failed, trying regular push..."
+            if git push origin main; then
+              echo "✅ Successfully pushed to origin"
+            else
+              echo "❌ Push failed"
+              echo "Current status:"
+              git status
+              echo "Recent commits:"
+              git log --oneline -5
+              exit 1
+            fi
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # 清理临时文件
+          rm -rf /tmp/local_backup
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📊 Sync Summary"
+          echo "- Upstream commits: ${{ steps.check_updates.outputs.upstream_commits || '0' }}"
+          echo "- Has updates: ${{ steps.check_updates.outputs.has_updates || 'false' }}"
+          echo "- Merge status: ${{ steps.sync.outputs.merge_status || 'not attempted' }}"
+          echo "- Current commit: $(git rev-parse HEAD)"
+          echo "- Current branch: $(git rev-parse --abbrev-ref HEAD)"
+          
+          # 显示最近的提交历史
+          echo ""
+          echo "### Recent commits:"
+          git log --oneline -5
