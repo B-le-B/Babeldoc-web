@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import queue
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.4.6"
+__version__ = "0.4.15"
 
 
 def create_parser():
@@ -60,6 +61,10 @@ def create_parser():
     )
     parser.add_argument(
         "--rpc-doclayout2",
+        help="RPC service host address for document layout analysis",
+    )
+    parser.add_argument(
+        "--rpc-doclayout3",
         help="RPC service host address for document layout analysis",
     )
     parser.add_argument(
@@ -271,6 +276,12 @@ def create_parser():
         default=False,
         help="Only include translated pages in the output PDF. Effective only when --pages is used.",
     )
+    translation_group.add_argument(
+        "--save-auto-extracted-glossary",
+        action="store_true",
+        default=False,
+        help="Save automatically extracted glossary terms to a CSV file in the output directory.",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -358,6 +369,10 @@ async def main():
         from babeldoc.docvision.rpc_doclayout2 import RpcDocLayoutModel
 
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout2)
+    elif args.rpc_doclayout3:
+        from babeldoc.docvision.rpc_doclayout3 import RpcDocLayoutModel
+
+        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout3)
     else:
         from babeldoc.docvision.doclayout import DocLayoutModel
 
@@ -498,6 +513,7 @@ async def main():
             auto_enable_ocr_workaround=args.auto_enable_ocr_workaround,
             primary_font_family=args.primary_font_family,
             only_include_translated_page=args.only_include_translated_page,
+            save_auto_extracted_glossary=args.save_auto_extracted_glossary,
         )
 
         # Create progress handler
@@ -609,6 +625,35 @@ def download_font_assets():
     return babeldoc.format.pdf.high_level.download_font_assets()
 
 
+class EvictQueue(queue.Queue):
+    def __init__(self, maxsize):
+        self.discarded = 0
+        super().__init__(maxsize)
+
+    def put(self, item, block=False, timeout=None):
+        while True:
+            try:
+                super().put(item, block=False)
+                break
+            except queue.Full:
+                try:
+                    self.get_nowait()
+                    self.discarded += 1
+                except queue.Empty:
+                    pass
+
+
+def speed_up_logs():
+    import logging.handlers
+
+    root_logger = logging.getLogger()
+    log_que = EvictQueue(1000)
+    queue_handler = logging.handlers.QueueHandler(log_que)
+    queue_listener = logging.handlers.QueueListener(log_que, *root_logger.handlers)
+    queue_listener.start()
+    root_logger.handlers = [queue_handler]
+
+
 def cli():
     """Command line interface entry point."""
     from rich.logging import RichHandler
@@ -637,6 +682,7 @@ def cli():
             v.disabled = True
             v.propagate = False
 
+    speed_up_logs()
     babeldoc.format.pdf.high_level.init()
     asyncio.run(main())
 
