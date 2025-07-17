@@ -81,3 +81,41 @@ jobs:
             echo "✅ Already up to date with upstream"
             echo "has_updates=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Create backup branch
+        if: steps.check_updates.outputs.has_updates == 'true'
+        run: |
+          BACKUP_BRANCH="backup-$(date +%Y%m%d-%H%M%S)"
+          git branch $BACKUP_BRANCH
+          echo "📋 Created backup branch: $BACKUP_BRANCH"
+
+      - name: Sync with upstream
+        if: steps.check_updates.outputs.has_updates == 'true'
+        id: sync
+        run: |
+          echo "🔄 Starting sync process..."
+          
+          echo "📦 Backing up local configuration files..."
+          mkdir -p /tmp/local_backup
+          
+          if [ -f "requirements.txt" ]; then
+            cp requirements.txt /tmp/local_backup/
+          fi
+          if [ -f "package.json" ]; then
+            cp package.json /tmp/local_backup/
+          fi
+          if [ -d ".github/workflows" ]; then
+            cp -r .github/workflows /tmp/local_backup/
+          fi
+          
+          echo "🔀 Attempting to merge upstream/main..."
+          if git merge upstream/main --no-edit --strategy=ort --strategy-option=ours; then
+            echo "✅ Merge completed successfully"
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Merge conflicts detected"
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            git merge --abort
+            git merge upstream/main --no-edit --strategy=recursive -X ours
+            echo "✅ Resolved conflicts using ours strategy"
+          fi
