@@ -440,6 +440,8 @@ Everyone interacting in YADT and its sub-projects' codebases, issue trackers, ch
  </picture>
 </a>
 
+<!-- trigger github actions -->
+
 > [!WARNING]
 > **Important Interaction Note for `--auto-enable-ocr-workaround`:**
 >
