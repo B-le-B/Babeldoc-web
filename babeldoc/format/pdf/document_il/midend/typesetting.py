@@ -604,7 +604,7 @@ class Typesetting:
             font_size=6,
             graphic_state=il_version_1.GraphicState(),
         )
-        text = f"本文档由 funstory.ai 的开源 PDF 翻译库 BabelDOC {WATERMARK_VERSION} (http://yadt.io) 翻译，本仓库正在积极的建设当中，欢迎 star 和关注。"
+        text = f"本文档由 https://mypdf1.streamlit.app 翻译，欢迎推广、送作者一杯咖啡。"
         if self.translation_config.debug:
             text += "\n 当前为 DEBUG 模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。"
         page.pdf_paragraph.append(
