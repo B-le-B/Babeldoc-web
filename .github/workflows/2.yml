@@ -45,3 +45,39 @@ jobs:
             exit 1
           }
           echo "✅ Fetch successful"
+
+      - name: Get current branch
+        id: get_branch
+        run: |
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "current_branch=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+          echo "Current branch: $CURRENT_BRANCH"
+          
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+            echo "⚠️ Not on main branch, switching..."
+            git checkout main || {
+              echo "❌ Failed to checkout main branch"
+              exit 1
+            }
+          fi
+
+      - name: Check for updates
+        id: check_updates
+        run: |
+          git pull origin main --ff-only || {
+            echo "⚠️ Cannot fast-forward pull, will handle in sync step"
+          }
+          
+          UPSTREAM_COMMITS=$(git rev-list HEAD..upstream/main --count 2>/dev/null || echo "0")
+          echo "upstream_commits=$UPSTREAM_COMMITS" >> $GITHUB_OUTPUT
+          
+          if [ "$UPSTREAM_COMMITS" -gt 0 ]; then
+            echo "📊 Found $UPSTREAM_COMMITS new commits from upstream"
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            
+            echo "Commits to be merged:"
+            git log HEAD..upstream/main --oneline --max-count=10
+          else
+            echo "✅ Already up to date with upstream"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          fi
