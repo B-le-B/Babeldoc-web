@@ -5,6 +5,7 @@ permissions:
   pull-requests: write
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 8 * * 1'
   workflow_dispatch:
