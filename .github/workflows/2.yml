@@ -119,3 +119,42 @@ jobs:
             git merge upstream/main --no-edit --strategy=recursive -X ours
             echo "✅ Resolved conflicts using ours strategy"
           fi
+
+      - name: Push changes
+        if: steps.check_updates.outputs.has_updates == 'true'
+        run: |
+          echo "📤 Pushing changes to origin..."
+          
+          if git push origin main --force-with-lease; then
+            echo "✅ Successfully pushed to origin"
+            echo "🚀 Streamlit Cloud will auto-deploy the changes!"
+          else
+            echo "⚠️ Push with lease failed, trying regular push..."
+            if git push origin main; then
+              echo "✅ Successfully pushed to origin"
+            else
+              echo "❌ Push failed"
+              git status
+              git log --oneline -5
+              exit 1
+            fi
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf /tmp/local_backup
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📊 Sync Summary"
+          echo "- Upstream commits: ${{ steps.check_updates.outputs.upstream_commits || '0' }}"
+          echo "- Has updates: ${{ steps.check_updates.outputs.has_updates || 'false' }}"
+          echo "- Merge status: ${{ steps.sync.outputs.merge_status || 'not attempted' }}"
+          echo "- Current commit: $(git rev-parse HEAD)"
+          echo "- Current branch: $(git rev-parse --abbrev-ref HEAD)"
+          
+          echo ""
+          echo "### Recent commits:"
+          git log --oneline -5
