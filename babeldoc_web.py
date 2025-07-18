@@ -87,6 +87,11 @@ MODEL_PROVIDERS = {
         "base_url": "https://api.siliconflow.cn/v1",
         "model": "THUDM/GLM-4-9B-0414"
     },
+    "智谱": {
+        "api_key_env": "ZHIPU_API_KEY", 
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "GLM-4-Flash-250414"
+    },         
     "ModelScope": {
         "api_key_env": "MODELSCOPE_API_KEY", 
         "base_url": "https://api-inference.modelscope.cn/v1",
