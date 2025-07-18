@@ -334,12 +334,57 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# 请作者喝咖啡按钮 - 放在标题下方靠右
+col_title, col_coffee = st.columns([3, 1])
+with col_coffee:
+    if st.button("☕ 请作者喝咖啡"):
+        st.session_state.show_donation = True
+
 # 文件上传
 uploaded_files = st.file_uploader(
     "上传PDF文件", 
     type=['pdf'], 
     accept_multiple_files=True
 )
+
+# 弹出式支付窗口
+if st.session_state.get('show_donation', False):
+    @st.dialog("感谢您的支持！💖")
+    def show_donation_dialog():
+        # 两张支付二维码图片
+        col_pay1, col_pay2 = st.columns(2)
+        
+        with col_pay1:
+            # st.write("**微信支付**")
+            try:
+                st.image("pic/wechat_qr.png", width=200)
+            except:
+                st.error("未找到微信支付二维码图片 (pic/wechat_qr.png)")
+        
+        with col_pay2:
+            # st.write("**支付宝**")
+            try:
+                st.image("pic/alipay_qr.png", width=200)
+            except:
+                st.error("未找到支付宝二维码图片 (pic/alipay_qr.png)")
+        
+        st.markdown("---")
+        st.markdown(
+            """
+            <div style='text-align: center; padding: 10px;'>
+                <h4>感谢您的支持！</h4>
+                <p>您的支持是我持续开发和维护这个项目的动力！</p>
+                <p>如果这个工具对您有帮助，请考虑请作者喝杯咖啡 ☕</p>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+        
+        if st.button("关闭", type="primary"):
+            st.session_state.show_donation = False
+            st.rerun()
+    
+    show_donation_dialog()
 
 # 开始翻译按钮
 start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files)
