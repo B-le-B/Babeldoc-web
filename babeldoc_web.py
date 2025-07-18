@@ -451,7 +451,7 @@ with st.expander("📄 输出选项"):
         pages = st.text_input("页面范围", "", placeholder="例: 1-5,8,10-", 
                              help="指定要翻译的页面，留空则翻译全部页面")
         watermark_mode = st.selectbox("水印模式", 
-            ["watermarked", "no_watermark", "both"], index=1,
+            ["watermarked", "no_watermark", "both"], index=0,
             format_func=lambda x: {"watermarked": "添加水印", "no_watermark": "无水印", "both": "两种版本"}[x])
         
     with col4:
