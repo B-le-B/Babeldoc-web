@@ -337,8 +337,110 @@ st.markdown(
 # 请作者喝咖啡按钮 - 放在标题下方靠右
 col_title, col_coffee = st.columns([3, 1])
 with col_coffee:
-    if st.button("☕ 请作者喝咖啡"):
+    # 只给咖啡按钮添加变色样式
+    st.markdown("""
+    <style>
+    @keyframes text-color-shift {
+        0% { color: #ff6b6b; }
+        16.66% { color: #4ecdc4; }
+        33.33% { color: #45b7d1; }
+        50% { color: #96ceb4; }
+        66.66% { color: #ffeaa7; }
+        83.33% { color: #fd79a8; }
+        100% { color: #ff6b6b; }
+    }
+    
+    /* 只给咖啡按钮添加变色效果 - 使用更精确的选择器 */
+    button[data-testid="baseButton-secondary"]:contains("☕ 请作者喝咖啡") {
+        animation: text-color-shift 3s linear infinite !important;
+        font-weight: bold !important;
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    /* 备用选择器 - 通过按钮文本内容匹配 */
+    div[data-testid="stButton"] > button[kind="secondary"] {
+        animation: text-color-shift 3s linear infinite !important;
+        font-weight: bold !important;
+        background: transparent !important;
+        border: none !important;
+    }
+    
+    /* 确保开始翻译按钮不受影响 */
+    div[data-testid="stButton"] > button[kind="primary"] {
+        animation: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    if st.button("☕ 请作者喝咖啡", key="coffee_donation"):
         st.session_state.show_donation = True
+
+# 设置紧凑布局
+st.markdown("""
+<style>
+/* 标题到顶部距离设为-30px */
+.main .block-container {
+    padding-top: -100px !important;
+    padding-bottom: 0 !important;
+    margin-top: -100px !important;
+}
+
+/* 标题本身紧凑 */
+h1 {
+    margin: 0 !important;
+    padding: 0 !important;
+    margin-bottom: 0px !important;
+}
+
+/* 强制所有元素紧凑排列 */
+.element-container {
+    margin: 0 !important;
+    padding: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* 列布局紧凑 */
+div[data-testid="column"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+}
+
+/* 按钮紧凑 */
+div[data-testid="stButton"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* 文件上传器紧凑 */
+div[data-testid="stFileUploader"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    margin-top: 0 !important;
+}
+
+/* Markdown元素紧凑 */
+.stMarkdown {
+    margin: 0 !important;
+    padding: 0 !important;
+    margin-bottom: 0 !important;
+}
+
+/* 强制移除所有默认间距 */
+.stApp > div {
+    gap: 0 !important;
+}
+
+/* 移除行间距 */
+.row-widget {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # 文件上传
 uploaded_files = st.file_uploader(
@@ -355,14 +457,14 @@ if st.session_state.get('show_donation', False):
         col_pay1, col_pay2 = st.columns(2)
         
         with col_pay1:
-            # st.write("**微信支付**")
+            st.write("**微信支付**")
             try:
                 st.image("pic/wechat_qr.png", width=200)
             except:
                 st.error("未找到微信支付二维码图片 (pic/wechat_qr.png)")
         
         with col_pay2:
-            # st.write("**支付宝**")
+            st.write("**支付宝**")
             try:
                 st.image("pic/alipay_qr.png", width=200)
             except:
@@ -777,19 +879,17 @@ with st.expander("📖 使用说明"):
     - **自定义**: 手动配置其他服务商
     
     **API Key配置：**
+    - 可通过环境变量或Streamlit Secrets配置
     - 支持在界面中直接输入
-
-
-    **📲 如何在手机上像App一样使用？**
     
-    **对于 iPhone (Safari 浏览器):**
-    1. 点击屏幕底部的 **分享** 图标 (一个方框加一个向上的箭头)。
-    2. 向下滚动，找到并点击 **“添加到主屏幕”** (Add to Home Screen)。
-    3. 点击 **“添加”** (Add) 即可。
-
-    **对于 Android (Chrome 浏览器):**
-    1. 点击浏览器右上角的 **三个点** 菜单按钮。
-    2. 找到并点击 **“安装应用”** (Install app) 或 **“添加到主屏幕”** (Add to Home screen)。
-    3. 按照提示完成操作。   
-
+    **文件安全：**
+    - 每次翻译使用独立的临时目录
+    - 翻译完成后文件立即读取到内存
+    - 临时文件自动清理，保证用户隔离
+    
+    **下载说明：**
+    - 翻译完成后自动显示下载按钮
+    - 下载按钮点击后不会消失，直到下次翻译开始
+    - 支持单个文件下载和批量ZIP下载
+    - 所有文件处理都在内存中完成，安全可靠
     """)
