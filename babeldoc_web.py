@@ -373,8 +373,12 @@ with col_coffee:
     </style>
     """, unsafe_allow_html=True)
     
+    # 使用特殊的key机制避免意外触发
+    coffee_button_key = f"coffee_donation_{int(time.time() * 1000) % 10000}"
+    
     if st.button("☕ 请作者喝咖啡", key="coffee_donation"):
-        st.session_state.show_donation = True
+        # 设置一个临时标记，只在当前运行中有效
+        st.session_state.coffee_just_clicked = True
 
 # 设置紧凑布局
 st.markdown("""
@@ -449,8 +453,11 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# 弹出式支付窗口
-if st.session_state.get('show_donation', False):
+# 弹窗显示逻辑 - 只在真正点击咖啡按钮时显示
+if st.session_state.get('coffee_just_clicked', False):
+    # 清除标记，避免重复显示
+    st.session_state.coffee_just_clicked = False
+    
     @st.dialog("感谢您的支持！💖")
     def show_donation_dialog():
         # 两张支付二维码图片
@@ -482,11 +489,11 @@ if st.session_state.get('show_donation', False):
             unsafe_allow_html=True
         )
         
-        if st.button("关闭", type="primary"):
-            st.session_state.show_donation = False
-            st.rerun()
+        # 关闭按钮
+        st.button("关闭", type="primary")
     
     show_donation_dialog()
+
 
 # 开始翻译按钮
 start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploaded_files)
@@ -494,6 +501,8 @@ start_button = st.button("🚀 开始翻译", type="primary", disabled=not uploa
 # 如果点击了翻译按钮，立即清空缓存
 if start_button:
     st.session_state.translation_results = []
+    # 清除咖啡按钮标记，避免翻译过程中弹窗
+    st.session_state.coffee_just_clicked = False
 
 # 立即预留进度显示位置
 progress_placeholder = st.empty()
