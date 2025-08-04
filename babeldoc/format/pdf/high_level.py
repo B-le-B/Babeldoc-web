@@ -88,6 +88,15 @@ resfont_map = {
 }
 
 
+def safe_save(doc, *args, **kwargs):
+    try:
+        # first try, saving without options
+        doc.save(*args, **kwargs)
+    except Exception:
+        # second try, saving with 'garbage=3' for object missing
+        doc.ez_save(*args, **kwargs)
+
+
 def fix_cmap(translate_result: TranslateResult, translate_config: TranslationConfig):
     processed = []
     for attr in (
@@ -104,7 +113,7 @@ def fix_cmap(translate_result: TranslateResult, translate_config: TranslationCon
         temp_path = translate_config.get_working_file_path(f"{path.stem}.cmap.pdf")
         pdf = pymupdf.open(path)
         reproduce_cmap(pdf)
-        pdf.save(temp_path)
+        safe_save(pdf, temp_path)
         shutil.move(temp_path, path)
 
 
@@ -563,7 +572,7 @@ def do_translate(
                                     from_page=split_point.start_page,
                                     to_page=split_point.end_page,
                                 )
-                                temp_doc.save(part_temp_input_path)
+                                safe_save(temp_doc, part_temp_input_path)
                                 assert (
                                     temp_doc.page_count
                                     == split_point.end_page - split_point.start_page + 1
@@ -695,6 +704,7 @@ def migrate_toc(
         )
 
 
+# mediabox -> '[0 nul 792]'
 def fix_media_box(doc: Document) -> None:
     mediabox_data = {}
     for x in range(1, doc.xref_length()):
@@ -703,9 +713,16 @@ def fix_media_box(doc: Document) -> None:
         if t[1] in ["/Pages", "/Page"]:
             mediabox = doc.xref_get_key(x, "MediaBox")
             if mediabox[0] == "array":
-                _, _, x1, y1 = mediabox[1].replace("[", "").replace("]", "").split(" ")
-                doc.xref_set_key(x, "MediaBox", f"[0 0 {x1} {y1}]")
-                box_set["MediaBox"] = mediabox[1]
+                try:
+                    _, _, x1, y1 = (
+                        mediabox[1].replace("[", "").replace("]", "").split(" ")
+                    )
+                    doc.xref_set_key(x, "MediaBox", f"[0 0 {x1} {y1}]")
+                    box_set["MediaBox"] = mediabox[1]
+                except Exception:
+                    logger.warning(
+                        "Attempt to fix media box failed; some pages may not have been processed correctly."
+                    )
             for k in ["CropBox", "BleedBox", "TrimBox", "ArtBox"]:
                 box = doc.xref_get_key(x, k)
                 if box[0] != "null":
@@ -754,13 +771,13 @@ def _do_translate_single(
             fix_null_xref(doc_input)
         except Exception:
             logger.exception("auto fix failed, please check the pdf file")
-        doc_input.save(output_path, expand=True, pretty=True)
+        safe_save(doc_input, output_path, expand=True, pretty=True)
         del doc_input
 
     # Continue with original processing
     temp_pdf_path = translation_config.get_working_file_path("input.pdf")
     doc_pdf2zh = Document(original_pdf_path)
-    resfont = "china-ss"
+    safe_save(doc_pdf2zh, temp_pdf_path)
 
     # Fix null xref in PDF file
     invalid_pages = []
@@ -777,7 +794,7 @@ def _do_translate_single(
     #     page.insert_font(resfont, None)
 
     resfont = None
-    doc_pdf2zh.save(temp_pdf_path)
+    safe_save(doc_pdf2zh, temp_pdf_path)
 
     # if not translation_config.skip_scanned_detection and DetectScannedFile(
     #     translation_config
@@ -978,7 +995,7 @@ def generate_first_page_with_watermark(
         watermarked_temp_pdf_path = watermarked_config.get_working_file_path(
             "watermarked_temp_input.pdf"
         )
-        first_page_doc.save(watermarked_temp_pdf_path)
+        safe_save(first_page_doc, watermarked_temp_pdf_path)
 
         Typesetting(watermarked_config).typsetting_document(il_only_first_page_doc)
         pdf_creater = PDFCreater(

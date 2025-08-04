@@ -1,4 +1,3 @@
-import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -6,6 +5,7 @@ from pathlib import Path
 
 import cv2
 import httpx
+import msgpack
 import numpy as np
 import pymupdf
 from tenacity import retry
@@ -73,21 +73,28 @@ def predict_layout(
     """
     # Prepare request data
 
-    image_data = encode_image(image)
+    if not isinstance(image, list):
+        image = [image]
+    image_data = [encode_image(image) for image in image]
+    data = {
+        "image": image_data,
+    }
 
     # Pack data using msgpack
-    # packed_data = msgpack.packb(data, use_bin_type=True)
+    packed_data = msgpack.packb(data, use_bin_type=True)
     # logger.debug(f"Packed data size: {len(packed_data)} bytes")
 
     # Send request
     # logger.debug(f"Sending request to {host}/inference")
     response = httpx.post(
-        f"{host}/analyze?min_sim=0.7&early_stop=0.99&timeout=1800",
-        files={"file": ("image.jpg", image_data, "image/jpeg")},
+        # f"{host}/analyze?min_sim=0.7&early_stop=0.99&timeout=480",
+        f"{host}/inference",
+        data=packed_data,
         headers={
-            "Accept": "application/json",
+            "Content-Type": "application/msgpack",
+            "Accept": "application/msgpack",
         },
-        timeout=1800,
+        timeout=480,
         follow_redirects=True,
     )
 
@@ -97,16 +104,16 @@ def predict_layout(
     id_lookup = {}
     if response.status_code == 200:
         try:
-            result = json.loads(response.text)
+            result = msgpack.unpackb(response.content, raw=False)
             useful_result = []
             if isinstance(result, dict):
                 names = {}
                 for box in result["boxes"]:
-                    if box["ocr_match_score"] < 0.7:
+                    if box["score"] < 0.7:
                         continue
 
-                    box["xyxy"] = box["coords"]
-                    box["conf"] = box["ocr_match_score"]
+                    box["xyxy"] = box["coordinate"]
+                    box["conf"] = box["score"]
                     if box["label"] not in names:
                         idx += 1
                         names[idx] = box["label"]
@@ -295,7 +302,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         translate_config,
         save_debug_image,
     ):
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             yield from executor.map(
                 self.predict_page,
                 pages,

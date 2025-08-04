@@ -20,6 +20,7 @@ from babeldoc.docvision.base_doclayout import YoloResult
 from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
 
 logger = logging.getLogger(__name__)
+DPI = 150
 
 
 def encode_image(image) -> bytes:
@@ -50,14 +51,14 @@ def encode_image(image) -> bytes:
     ),  # 指数退避策略，初始 1 秒，最大 10 秒
     retry=retry_if_exception_type((httpx.HTTPError, Exception)),  # 针对哪些异常重试
     before_sleep=lambda retry_state: logger.warning(
-        f"Request failed, retrying in {retry_state.next_action.sleep} seconds... "
+        f"Request failed, retrying in {getattr(retry_state.next_action, 'sleep', 'unknown')} seconds... "
         f"(Attempt {retry_state.attempt_number}/3)"
     ),
 )
 def predict_layout(
     image,
     host: str = "http://localhost:8000",
-    imgsz: int = 1024,
+    _imgsz: int = 1024,
 ):
     """
     Predict document layout using the MOSEC service
@@ -71,12 +72,12 @@ def predict_layout(
         List of predictions containing bounding boxes and classes
     """
     # Prepare request data
+
     if not isinstance(image, list):
         image = [image]
     image_data = [encode_image(image) for image in image]
     data = {
         "image": image_data,
-        "imgsz": imgsz,
     }
 
     # Pack data using msgpack
@@ -86,31 +87,46 @@ def predict_layout(
     # Send request
     # logger.debug(f"Sending request to {host}/inference")
     response = httpx.post(
+        # f"{host}/analyze?min_sim=0.7&early_stop=0.99&timeout=480",
         f"{host}/inference",
         data=packed_data,
         headers={
             "Content-Type": "application/msgpack",
             "Accept": "application/msgpack",
         },
-        timeout=300,
+        timeout=480,
         follow_redirects=True,
     )
 
     # logger.debug(f"Response status: {response.status_code}")
     # logger.debug(f"Response headers: {response.headers}")
-
+    idx = 0
+    id_lookup = {}
     if response.status_code == 200:
         try:
             result = msgpack.unpackb(response.content, raw=False)
+            useful_result = []
             if isinstance(result, dict):
                 names = {}
                 for box in result["boxes"]:
+                    if box["score"] < 0.7:
+                        continue
+
                     box["xyxy"] = box["coordinate"]
                     box["conf"] = box["score"]
-                    box["cls"] = box["cls_id"]
+                    if box["label"] not in names:
+                        idx += 1
+                        names[idx] = box["label"]
+                        box["cls_id"] = idx
+                        id_lookup[box["label"]] = idx
+                    else:
+                        box["cls_id"] = id_lookup[box["label"]]
                     names[box["cls_id"]] = box["label"]
+                    box["cls"] = box["cls_id"]
+                    useful_result.append(box)
                 if "names" not in result:
                     result["names"] = names
+                result["boxes"] = useful_result
                 result = [result]
             return result
         except Exception as e:
@@ -214,7 +230,7 @@ class RpcDocLayoutModel(DocLayoutModel):
     def predict_image(
         self,
         image,
-        host: str = None,
+        host: str | None = None,
         result_container: ResultContainer | None = None,
         imgsz: int = 1024,
     ) -> ResultContainer:
@@ -226,8 +242,8 @@ class RpcDocLayoutModel(DocLayoutModel):
         target_imgsz = (orig_h, orig_w)
         if image.shape[0] != target_imgsz[0] or image.shape[1] != target_imgsz[1]:
             image = self.resize_and_pad_image(image, new_shape=target_imgsz)
-        preds = predict_layout([image], host=self.host, imgsz=800)
-
+        preds = predict_layout(image, host=self.host)
+        orig_h, orig_w = orig_h / DPI * 72, orig_w / DPI * 72
         if len(preds) > 0:
             for pred in preds:
                 boxes = [
@@ -269,7 +285,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         translate_config.raise_if_cancelled()
         with self.lock:
             # pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
-            pix = get_no_rotation_img(mupdf_doc[page.page_number])
+            pix = get_no_rotation_img(mupdf_doc[page.page_number], dpi=DPI)
         image = np.frombuffer(pix.samples, np.uint8).reshape(
             pix.height,
             pix.width,
@@ -286,7 +302,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         translate_config,
         save_debug_image,
     ):
-        with ThreadPoolExecutor(max_workers=128) as executor:
+        with ThreadPoolExecutor(max_workers=16) as executor:
             yield from executor.map(
                 self.predict_page,
                 pages,
