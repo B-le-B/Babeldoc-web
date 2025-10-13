@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import multiprocessing as mp
 import queue
+import random
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,7 @@ from rich.progress import TimeRemainingColumn
 
 import babeldoc.assets.assets
 import babeldoc.format.pdf.high_level
+from babeldoc.const import enable_process_pool
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.glossary import Glossary
@@ -22,7 +26,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.5.10"
+__version__ = "0.5.12"
 
 
 def create_parser():
@@ -97,6 +101,16 @@ def create_parser():
         "--working-dir",
         default=None,
         help="Working directory for translation. If not set, use temp directory.",
+    )
+    parser.add_argument(
+        "--metadata-extra-data",
+        default=None,
+        help="Extra data for metadata",
+    )
+    parser.add_argument(
+        "--enable-process-pool",
+        action="store_true",
+        help="DEBUG ONLY",
     )
     # translation option argument group
     translation_group = parser.add_argument_group(
@@ -385,6 +399,21 @@ def create_parser():
         help="The API key for the OpenAI API.",
     )
     service_group.add_argument(
+        "--openai-term-extraction-model",
+        default=None,
+        help="OpenAI model to use for automatic term extraction. Defaults to --openai-model when unset.",
+    )
+    service_group.add_argument(
+        "--openai-term-extraction-base-url",
+        default=None,
+        help="Base URL for the OpenAI API used during automatic term extraction. Falls back to --openai-base-url when unset.",
+    )
+    service_group.add_argument(
+        "--openai-term-extraction-api-key",
+        default=None,
+        help="API key for the OpenAI API used during automatic term extraction. Falls back to --openai-api-key when unset.",
+    )
+    service_group.add_argument(
         "--enable-json-mode-if-requested",
         action="store_true",
         default=False,
@@ -440,6 +469,9 @@ async def main():
     if args.openai and not args.openai_api_key:
         parser.error("使用 OpenAI 服务时必须提供 API key")
 
+    if args.enable_process_pool:
+        enable_process_pool()
+
     # 实例化翻译器
     if args.openai:
         translator = OpenAITranslator(
@@ -453,6 +485,23 @@ async def main():
             send_dashscope_header=args.send_dashscope_header,
             send_temperature=not args.no_send_temperature,
         )
+        term_extraction_translator = translator
+        if (
+            args.openai_term_extraction_model
+            or args.openai_term_extraction_base_url
+            or args.openai_term_extraction_api_key
+        ):
+            term_extraction_translator = OpenAITranslator(
+                lang_in=args.lang_in,
+                lang_out=args.lang_out,
+                model=args.openai_term_extraction_model or args.openai_model,
+                base_url=(args.openai_term_extraction_base_url or args.openai_base_url),
+                api_key=args.openai_term_extraction_api_key or args.openai_api_key,
+                ignore_cache=args.ignore_cache,
+                enable_json_mode_if_requested=args.enable_json_mode_if_requested,
+                send_dashscope_header=args.send_dashscope_header,
+                send_temperature=not args.no_send_temperature,
+            )
     else:
         raise ValueError("Invalid translator type")
 
@@ -584,6 +633,10 @@ async def main():
             args.max_pages_per_part
         )
 
+    total_term_extraction_total_tokens = 0
+    total_term_extraction_prompt_tokens = 0
+    total_term_extraction_completion_tokens = 0
+
     for file in pending_files:
         # 清理文件路径，去除两端的引号
         file = file.strip("\"'")
@@ -594,6 +647,7 @@ async def main():
             pages=args.pages,
             output_dir=args.output,
             translator=translator,
+            term_extraction_translator=term_extraction_translator,
             debug=args.debug,
             lang_in=args.lang_in,
             lang_out=args.lang_out,
@@ -638,6 +692,7 @@ async def main():
             non_formula_line_iou_threshold=args.non_formula_line_iou_threshold,
             figure_table_protection_threshold=args.figure_table_protection_threshold,
             skip_formula_offset_calculation=args.skip_formula_offset_calculation,
+            metadata_extra_data=args.metadata_extra_data,
         )
 
         def nop(_x):
@@ -645,7 +700,9 @@ async def main():
 
         getattr(doc_layout_model, "init_font_mapper", nop)(config)
         # Create progress handler
-        progress_context, progress_handler = create_progress_handler(config)
+        progress_context, progress_handler = create_progress_handler(
+            config, show_log=False
+        )
 
         # 开始翻译
         with progress_context:
@@ -660,12 +717,31 @@ async def main():
                     result = event["translate_result"]
                     logger.info(str(result))
                     break
+        usage = config.term_extraction_token_usage
+        total_term_extraction_total_tokens += usage["total_tokens"]
+        total_term_extraction_prompt_tokens += usage["prompt_tokens"]
+        total_term_extraction_completion_tokens += usage["completion_tokens"]
     logger.info(f"Total tokens: {translator.token_count.value}")
     logger.info(f"Prompt tokens: {translator.prompt_token_count.value}")
     logger.info(f"Completion tokens: {translator.completion_token_count.value}")
+    logger.info(
+        "Term extraction tokens: total=%s prompt=%s completion=%s",
+        total_term_extraction_total_tokens,
+        total_term_extraction_prompt_tokens,
+        total_term_extraction_completion_tokens,
+    )
+    if term_extraction_translator is not translator:
+        logger.info(
+            "Term extraction translator raw tokens: total=%s prompt=%s completion=%s",
+            term_extraction_translator.token_count.value,
+            term_extraction_translator.prompt_token_count.value,
+            term_extraction_translator.completion_token_count.value,
+        )
 
 
-def create_progress_handler(translation_config: TranslationConfig):
+def create_progress_handler(
+    translation_config: TranslationConfig, show_log: bool = False
+):
     """Create a progress handler function based on the configuration.
 
     Args:
@@ -688,6 +764,8 @@ def create_progress_handler(translation_config: TranslationConfig):
         stage_tasks = {}
 
         def progress_handler(event):
+            if show_log and random.random() <= 0.1:  # noqa: S311
+                logger.info(event)
             if event["type"] == "progress_start":
                 if event["stage"] not in stage_tasks:
                     stage_tasks[event["stage"]] = progress.add_task(
@@ -816,4 +894,8 @@ def cli():
 
 
 if __name__ == "__main__":
+    if sys.platform == "darwin" or sys.platform == "win32":
+        mp.set_start_method("spawn")
+    else:
+        mp.set_start_method("forkserver")
     cli()
