@@ -25,6 +25,7 @@ from babeldoc.babeldoc_exception.BabelDOCException import (
 )
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.const import WATERMARK_VERSION
+from babeldoc.const import close_process_pool
 from babeldoc.format.pdf.converter import TranslateConverter
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
@@ -61,6 +62,7 @@ from babeldoc.pdfminer.pdfinterp import PDFResourceManager
 from babeldoc.pdfminer.pdfpage import PDFPage
 from babeldoc.pdfminer.pdfparser import PDFParser
 from babeldoc.progress_monitor import ProgressMonitor
+from babeldoc.utils import memory
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +151,12 @@ def add_metadata(
             translated_by += f"_{translate_config.metadata_extra_data}"
         meta["producer"] = translated_by
         meta["creator"] = creator
+
+        for k, v in meta.items():
+            if v:
+                # 使用正则替换掉 surrogate 范围内的字符
+                meta[k] = re.sub(r"[\uD800-\uDFFF]", "", v)
+
         pdf.set_metadata(meta)
         safe_save(pdf, temp_path)
         shutil.move(temp_path, path)
@@ -448,20 +456,10 @@ class MemoryMonitor:
         self.peak_memory_usage = 0
         self.monitor_thread = None
         self.stop_event = None
-
-        try:
-            import psutil
-
-            self.psutil = psutil
-        except ImportError:
-            logger.warning("psutil not installed, memory monitoring disabled")
-            self.psutil = None
+        self.last_pss_check_time = None
 
     def __enter__(self):
         """Start memory monitoring."""
-        if not self.psutil:
-            return self
-
         self.stop_event = threading.Event()
         self.monitor_thread = threading.Thread(
             target=self._monitor_memory_usage, daemon=True
@@ -472,7 +470,7 @@ class MemoryMonitor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Stop monitoring and log peak memory usage."""
-        if not self.psutil or not self.monitor_thread:
+        if not self.monitor_thread:
             return
 
         self.stop_event.set()
@@ -483,14 +481,15 @@ class MemoryMonitor:
         """Background thread that periodically checks memory usage."""
         while not self.stop_event.is_set():
             try:
-                current_process = self.psutil.Process()
-                # Get memory usage of current process and all children
-                total_memory = current_process.memory_info().rss
-                for child in current_process.children(recursive=True):
-                    try:
-                        total_memory += child.memory_info().rss
-                    except (self.psutil.NoSuchProcess, self.psutil.AccessDenied):
-                        pass
+                # Use throttled memory check with 2-second PSS throttle
+                total_memory, self.last_pss_check_time = (
+                    memory.get_memory_usage_with_throttle(
+                        include_children=True,
+                        prefer_pss=True,
+                        last_pss_check_time=self.last_pss_check_time,
+                        pss_throttle_seconds=2.0,
+                    )
+                )
 
                 # Convert to MB for better readability
                 total_memory_mb = total_memory / (1024 * 1024)
@@ -500,6 +499,10 @@ class MemoryMonitor:
                 logger.warning(f"Error monitoring memory: {e}")
 
             time.sleep(self.interval)
+
+    def get_peek_memory_psutil(self):
+        """Get peak memory usage using psutil (for backwards compatibility)."""
+        return memory.get_memory_usage_bytes(include_children=True, prefer_pss=True)
 
 
 def fix_null_page_content(doc: Document) -> list[int]:
@@ -1005,6 +1008,7 @@ def _do_translate_single(
     logger.debug("start generating layouts")
     docs = LayoutParser(translation_config).process(docs, doc_pdf2zh)
     logger.debug("finish generating layouts")
+    close_process_pool()
     if translation_config.debug:
         xml_converter.write_json(
             docs,

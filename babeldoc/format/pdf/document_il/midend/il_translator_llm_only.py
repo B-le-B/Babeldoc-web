@@ -40,9 +40,11 @@ class BatchParagraph:
     def __init__(
         self,
         paragraphs: list[PdfParagraph],
+        pages: list[Page],
         page_tracker: PageTranslateTracker,
     ):
         self.paragraphs = paragraphs
+        self.pages = pages
         self.trackers = [page_tracker.new_paragraph() for _ in paragraphs]
 
 
@@ -112,6 +114,7 @@ class ILTranslatorLLMOnly:
         return None
 
     def translate(self, docs: Document) -> None:
+        self.il_translator.docs = docs
         tracker = DocumentTranslateTracker()
         self.mid = 0
 
@@ -361,8 +364,9 @@ class ILTranslatorLLMOnly:
 
             # Create batch with both paragraphs
             cross_page_paragraphs = [last_curr_paragraph, first_next_paragraph]
+            cross_page_pages = [page_curr, page_next]
             batch_paragraph = BatchParagraph(
-                cross_page_paragraphs, tracker.new_cross_page()
+                cross_page_paragraphs, cross_page_pages, tracker.new_cross_page()
             )
 
             self.mid += 1
@@ -438,7 +442,7 @@ class ILTranslatorLLMOnly:
                 p1.unicode
             ) + self.calc_token_count(p2.unicode)
 
-            batch = BatchParagraph([p1, p2], tracker.new_cross_column())
+            batch = BatchParagraph([p1, p2], [page, page], tracker.new_cross_column())
             self.mid += 1
             executor.submit(
                 self.translate_paragraph,
@@ -523,7 +527,7 @@ class ILTranslatorLLMOnly:
                 self.mid += 1
                 executor.submit(
                     self.translate_paragraph,
-                    BatchParagraph(paragraphs, tracker),
+                    BatchParagraph(paragraphs, [page] * len(paragraphs), tracker),
                     pbar,
                     page_font_map,
                     page_xobj_font_map,
@@ -541,7 +545,7 @@ class ILTranslatorLLMOnly:
             self.mid += 1
             executor.submit(
                 self.translate_paragraph,
-                BatchParagraph(paragraphs, tracker),
+                BatchParagraph(paragraphs, [page] * len(paragraphs), tracker),
                 pbar,
                 page_font_map,
                 page_xobj_font_map,
@@ -630,74 +634,14 @@ class ILTranslatorLLMOnly:
             llm_prompt_parts.append("#role")
             if self.translation_config.custom_system_prompt:
                 llm_prompt_parts.append(self.translation_config.custom_system_prompt)
+                llm_prompt_parts.append(
+                    "When translating, strictly follow the instructions below to ensure translation quality and preserve all formatting, tags, and placeholders:\n"
+                )
             else:
                 llm_prompt_parts.append(
                     f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}.\n"
                     "When translating, strictly follow the instructions below to ensure translation quality and preserve all formatting, tags, and placeholders:\n"
                 )
-
-            # 2. ##Contextual Hints for Better Translation
-            contextual_hints_section: list[str] = []
-            hint_idx = 1
-            if title_paragraph:
-                contextual_hints_section.append(
-                    f"{hint_idx}. First title in full text: {title_paragraph.unicode}"
-                )
-                hint_idx += 1
-
-            if local_title_paragraph:
-                is_different_from_global = True
-                if title_paragraph:
-                    if local_title_paragraph.debug_id == title_paragraph.debug_id:
-                        is_different_from_global = False
-
-                if is_different_from_global:
-                    contextual_hints_section.append(
-                        f"{hint_idx}. Most similar section title: {local_title_paragraph.unicode}"
-                    )
-                    hint_idx += 1
-
-            # --- ADD GLOSSARY HINTS ---
-            batch_text_for_glossary_matching = "\n".join(
-                item.get("input", "") for item in json_format_input
-            )
-
-            active_glossary_markdown_blocks: list[str] = []
-            # Use cached glossaries
-            if self._cached_glossaries:
-                for glossary in self._cached_glossaries:
-                    # Get active entries for the current batch_text_for_glossary_matching
-                    active_entries = glossary.get_active_entries_for_text(
-                        batch_text_for_glossary_matching
-                    )
-
-                    if active_entries:
-                        current_glossary_md_entries: list[str] = []
-                        for original_source, target_text in sorted(active_entries):
-                            current_glossary_md_entries.append(
-                                f"| {original_source} | {target_text} |"
-                            )
-
-                        if current_glossary_md_entries:
-                            glossary_table_md = (
-                                f"### Glossary: {glossary.name}\n\n"
-                                "| Source Term | Target Term |\n"
-                                "|-------------|-------------|\n"
-                                + "\n".join(current_glossary_md_entries)
-                            )
-                            active_glossary_markdown_blocks.append(glossary_table_md)
-
-            if contextual_hints_section or active_glossary_markdown_blocks:
-                llm_prompt_parts.append("\n## Contextual Hints for Better Translation")
-                llm_prompt_parts.extend(contextual_hints_section)
-
-                if active_glossary_markdown_blocks:
-                    llm_prompt_parts.append(
-                        f"{hint_idx}. You MUST strictly adhere to the following glossaries. auto_extracted_glossary has a lower priority; please give preference to other glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
-                    )
-                    # hint_idx += 1 # No need to increment if tables are part of this point
-                    for md_block in active_glossary_markdown_blocks:
-                        llm_prompt_parts.append(f"\n{md_block}\n")
 
             # 3. ## Strict Rules:
             llm_prompt_parts.append("\n## Strict Rules:")
@@ -763,6 +707,69 @@ class ILTranslatorLLMOnly:
             llm_prompt_parts.append("}")
             llm_prompt_parts.append("```")
             llm_prompt_parts.append("</example>")
+
+            # 2. ##Contextual Hints for Better Translation
+            contextual_hints_section: list[str] = []
+            hint_idx = 1
+            if title_paragraph:
+                contextual_hints_section.append(
+                    f"{hint_idx}. First title in full text: {title_paragraph.unicode}"
+                )
+                hint_idx += 1
+
+            if local_title_paragraph:
+                is_different_from_global = True
+                if title_paragraph:
+                    if local_title_paragraph.debug_id == title_paragraph.debug_id:
+                        is_different_from_global = False
+
+                if is_different_from_global:
+                    contextual_hints_section.append(
+                        f"{hint_idx}. The most recent title is: {local_title_paragraph.unicode}"
+                    )
+                    hint_idx += 1
+
+            # --- ADD GLOSSARY HINTS ---
+            batch_text_for_glossary_matching = "\n".join(
+                item.get("input", "") for item in json_format_input
+            )
+
+            active_glossary_markdown_blocks: list[str] = []
+            # Use cached glossaries
+            if self._cached_glossaries:
+                for glossary in self._cached_glossaries:
+                    # Get active entries for the current batch_text_for_glossary_matching
+                    active_entries = glossary.get_active_entries_for_text(
+                        batch_text_for_glossary_matching
+                    )
+
+                    if active_entries:
+                        current_glossary_md_entries: list[str] = []
+                        for original_source, target_text in sorted(active_entries):
+                            current_glossary_md_entries.append(
+                                f"| {original_source} | {target_text} |"
+                            )
+
+                        if current_glossary_md_entries:
+                            glossary_table_md = (
+                                f"### Glossary: {glossary.name}\n\n"
+                                "| Source Term | Target Term |\n"
+                                "|-------------|-------------|\n"
+                                + "\n".join(current_glossary_md_entries)
+                            )
+                            active_glossary_markdown_blocks.append(glossary_table_md)
+
+            if contextual_hints_section or active_glossary_markdown_blocks:
+                llm_prompt_parts.append("\n## Contextual Hints for Better Translation")
+                llm_prompt_parts.extend(contextual_hints_section)
+
+                if active_glossary_markdown_blocks:
+                    llm_prompt_parts.append(
+                        f"{hint_idx}. You MUST strictly adhere to the following glossaries. please give preference to other glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
+                    )
+                    # hint_idx += 1 # No need to increment if tables are part of this point
+                    for md_block in active_glossary_markdown_blocks:
+                        llm_prompt_parts.append(f"\n{md_block}\n")
 
             # 6. ## Here is the input:
             llm_prompt_parts.append("\n## Here is the input:")
@@ -894,6 +901,7 @@ class ILTranslatorLLMOnly:
                         executor.submit(
                             self.il_translator.translate_paragraph,
                             inputs[id_][2],
+                            batch_paragraph.pages[id_],
                             pbar,
                             inputs[id_][3],
                             page_font_map,
@@ -929,6 +937,7 @@ class ILTranslatorLLMOnly:
                 executor.submit(
                     self.il_translator.translate_paragraph,
                     paragraph,
+                    batch_paragraph.pages[i],
                     pbar,
                     tracker,
                     page_font_map,

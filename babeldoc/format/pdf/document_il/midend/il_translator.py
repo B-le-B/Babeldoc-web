@@ -4,12 +4,16 @@ import copy
 import json
 import logging
 import re
+import threading
 from pathlib import Path
 
 import tiktoken
 from tqdm import tqdm
 
+import babeldoc.format.pdf.document_il.il_version_1 as il_version_1
+from babeldoc.babeldoc_exception.BabelDOCException import ContentFilterError
 from babeldoc.format.pdf.document_il import Document
+from babeldoc.format.pdf.document_il import GraphicState
 from babeldoc.format.pdf.document_il import Page
 from babeldoc.format.pdf.document_il import PdfFont
 from babeldoc.format.pdf.document_il import PdfFormula
@@ -34,6 +38,7 @@ from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
     is_pure_numeric_paragraph,
 )
+from babeldoc.format.pdf.document_il.utils.style_helper import GRAY80
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
@@ -307,6 +312,8 @@ class ILTranslator:
             self.support_llm_translate = False
 
         self.use_as_fallback = False
+        self.add_content_filter_hint_lock = threading.Lock()
+        self.docs = None
 
     def calc_token_count(self, text: str) -> int:
         try:
@@ -315,6 +322,7 @@ class ILTranslator:
             return 0
 
     def translate(self, docs: Document):
+        self.docs = docs
         tracker = DocumentTranslateTracker()
 
         if not self.translation_config.shared_context_cross_split_part.first_paragraph:
@@ -390,6 +398,7 @@ class ILTranslator:
             executor.submit(
                 self.translate_paragraph,
                 paragraph,
+                page,
                 pbar,
                 tracker.new_paragraph(),
                 page_font_map,
@@ -881,6 +890,38 @@ class ILTranslator:
                 f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
             ]
 
+        llm_input.append("When translating, please follow the following rules:")
+
+        rich_text_left_placeholder = (
+            self.translate_engine.get_rich_text_left_placeholder(1)
+        )
+        if isinstance(rich_text_left_placeholder, tuple):
+            rich_text_left_placeholder = rich_text_left_placeholder[0]
+        rich_text_right_placeholder = (
+            self.translate_engine.get_rich_text_right_placeholder(2)
+        )
+        if isinstance(rich_text_right_placeholder, tuple):
+            rich_text_right_placeholder = rich_text_right_placeholder[0]
+
+        # Create a structured prompt template for LLM translation
+        llm_input.append(
+            f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
+        )
+
+        formula_placeholder = self.translate_engine.get_formular_placeholder(3)
+        if isinstance(formula_placeholder, tuple):
+            formula_placeholder = formula_placeholder[0]
+
+        llm_input.append(
+            f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
+        )
+        llm_input.append(
+            "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
+        )
+        llm_input.append(
+            f"4. Only output the translation result in {self.translation_config.lang_out} without explanations and annotations."
+        )
+
         llm_context_hints = []
 
         if title_paragraph:
@@ -943,41 +984,8 @@ class ILTranslator:
                 for md_block in active_glossary_markdown_blocks:
                     llm_input.append(f"\n{md_block}\n")
 
-        llm_input.append("When translating, please follow the following rules:")
-
-        rich_text_left_placeholder = (
-            self.translate_engine.get_rich_text_left_placeholder(1)
-        )
-        if isinstance(rich_text_left_placeholder, tuple):
-            rich_text_left_placeholder = rich_text_left_placeholder[0]
-        rich_text_right_placeholder = (
-            self.translate_engine.get_rich_text_right_placeholder(2)
-        )
-        if isinstance(rich_text_right_placeholder, tuple):
-            rich_text_right_placeholder = rich_text_right_placeholder[0]
-
-        # Create a structured prompt template for LLM translation
-        llm_input.append(
-            f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
-        )
-
-        formula_placeholder = self.translate_engine.get_formular_placeholder(3)
-        if isinstance(formula_placeholder, tuple):
-            formula_placeholder = formula_placeholder[0]
-
-        llm_input.append(
-            f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
-        )
-        llm_input.append(
-            "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
-        )
-        llm_input.append(
-            f"4. Only output the translation result in {self.translation_config.lang_out} without explanations and annotations."
-        )
-        llm_input.append(f"5. Translate text into {self.translation_config.lang_out}.")
         prompt_template = f"""
 Now, please carefully read the following text to be translated and directly output your translation.\n\n{text}
-
 """
         llm_input.append(prompt_template)
 
@@ -985,9 +993,58 @@ Now, please carefully read the following text to be translated and directly outp
 
         return final_input
 
+    def add_content_filter_hint(self, page: Page, paragraph: PdfParagraph):
+        with self.add_content_filter_hint_lock:
+            new_box = il_version_1.Box(
+                x=paragraph.box.x,
+                y=paragraph.box.y2,
+                x2=paragraph.box.x2,
+                y2=paragraph.box.y2 + 1.1,
+            )
+            page.pdf_paragraph.append(
+                self._create_text(
+                    "翻译服务检测到内容可能包含不安全或敏感内容，请您避免翻译敏感内容，感谢您的配合。",
+                    GRAY80,
+                    new_box,
+                    1,
+                )
+            )
+            logger.info("success add content filter hint")
+
+    def _create_text(
+        self,
+        text: str,
+        color: GraphicState,
+        box: il_version_1.Box,
+        font_size: float = 4,
+    ):
+        style = il_version_1.PdfStyle(
+            font_id="base",
+            font_size=font_size,
+            graphic_state=color,
+        )
+        return il_version_1.PdfParagraph(
+            first_line_indent=False,
+            box=box,
+            vertical=False,
+            pdf_style=style,
+            unicode=text,
+            pdf_paragraph_composition=[
+                il_version_1.PdfParagraphComposition(
+                    pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                        unicode=text,
+                        pdf_style=style,
+                        debug_info=True,
+                    ),
+                ),
+            ],
+            xobj_id=-1,
+        )
+
     def translate_paragraph(
         self,
         paragraph: PdfParagraph,
+        page: Page,
         pbar: tqdm | None = None,
         tracker: ParagraphTranslateTracker = None,
         page_font_map: dict[str, PdfFont] = None,
@@ -1039,6 +1096,10 @@ Now, please carefully read the following text to be translated and directly outp
                 self.post_translate_paragraph(
                     paragraph, tracker, translate_input, translated_text
                 )
+            except ContentFilterError as e:
+                logger.warning(f"ContentFilterError: {e.message}")
+                self.add_content_filter_hint(page, paragraph)
+                return
             except Exception as e:
                 logger.exception(
                     f"Error translating paragraph. Paragraph: {paragraph.debug_id} ({paragraph.unicode}). Error: {e}. ",

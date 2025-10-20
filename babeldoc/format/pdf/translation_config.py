@@ -227,6 +227,7 @@ class TranslationConfig:
 
         if self.ocr_workaround:
             self.skip_scanned_detection = True
+            self.disable_rich_text_translate = True
 
         # for backward compatibility
         if use_side_by_side_dual is False and use_alternating_pages_dual is False:
@@ -321,6 +322,7 @@ class TranslationConfig:
             "total_tokens": 0,
             "prompt_tokens": 0,
             "completion_tokens": 0,
+            "cache_hit_prompt_tokens": 0,
         }
 
         if self.ocr_workaround:
@@ -437,6 +439,7 @@ class TranslationConfig:
         total_tokens: int,
         prompt_tokens: int,
         completion_tokens: int,
+        cache_hit_prompt_tokens: int,
     ) -> None:
         """Accumulate token usage for automatic term extraction."""
         if total_tokens > 0:
@@ -445,6 +448,10 @@ class TranslationConfig:
             self.term_extraction_token_usage["prompt_tokens"] += prompt_tokens
         if completion_tokens > 0:
             self.term_extraction_token_usage["completion_tokens"] += completion_tokens
+        if cache_hit_prompt_tokens > 0:
+            self.term_extraction_token_usage["cache_hit_prompt_tokens"] += (
+                cache_hit_prompt_tokens
+            )
 
 
 class TranslateResult:
