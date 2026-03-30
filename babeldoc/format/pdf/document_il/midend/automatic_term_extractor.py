@@ -413,7 +413,7 @@ class AutomaticTermExtractor:
                 "auto_extractor_glossary.csv"
             )
             logger.debug(f"save auto extracted glossary to {path}")
-            with Path(path).open("w", encoding="utf-8") as f:
+            with Path(path).open("w", encoding="utf-8-sig") as f:
                 auto_extracted_glossary = self.shared_context.auto_extracted_glossary
                 if auto_extracted_glossary:
                     f.write(auto_extracted_glossary.to_csv())
